@@ -19,27 +19,45 @@ An intelligent autonomous character simulation that uses AI to create self-direc
 - Python 3.8+
 - Dependencies (install via pip):
   ```bash
-  pip install faiss-cpu
-  pip install sentence-transformers
-  pip install torch
-  pip install flask
+  pip install -r requirements.txt
   ```
 
 ## Project Structure
-```files
-├── autonomous_character.py # Main character logic and behavior
-├── autonomous_game.py # Game loop and simulation management
-├── knowledge_system.py # Long-term memory and knowledge management
-├── memory_system.py # Short-term memory and emotional state
-├── needs_system.py # Character needs simulation
-├── house.py # Environment definition
-├── browser_interface.py # Web browsing capabilities
-├── coding_system.py # Code generation and execution
-├── journal_system.py # Character journaling
-├── phone_system.py # Social interaction system
-└── main.py # Application entry point
-```
 
+```files
+main.py
+src/
+├── character/
+│   ├── autonomous_character.py  # Main character logic and behavior
+│   ├── character.py            # Base character class
+│   └── needs_system.py         # Character needs simulation
+├── computer/
+│   ├── browser.py             # Web browser simulation
+│   ├── browser_interface.py   # Browser interaction layer
+│   ├── coding_system.py       # Code generation and execution
+│   ├── game.py               # Game mechanics
+│   └── journal_system.py      # Character journaling
+├── ears/
+│   └── whisper_manager.py     # Speech recognition system
+├── environment/
+│   └── house.py              # Environment definition
+├── game/
+│   └── autonomous_game.py     # Game loop and simulation
+├── llm/
+│   └── llm_interface.py      # LLM integration
+├── memory/
+│   ├── knowledge_system.py    # Long-term memory
+│   └── memory_system.py       # Short-term memory
+├── phone/
+│   ├── index.html            # Voice chat interface
+│   ├── phone_system.py       # Phone functionality
+│   └── voice_chat_server.py  # Voice chat server
+├── utils/
+│   ├── constants.py          # Game constants
+│   └── models.py            # Data models
+└── voice/
+    └── speech.py            # Text-to-speech system
+```
 
 ## Getting Started
 
@@ -49,15 +67,46 @@ An intelligent autonomous character simulation that uses AI to create self-direc
    cd text-sims-ai
    ```
 
-2. Install dependencies:
+2. Create and configure environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Run the simulation:
+4. Run the simulation:
    ```bash
    python main.py
    ```
+
+## Main Entry Point (main.py)
+
+The main.py file serves as the entry point for the application:
+
+```python
+from src.game.autonomous_game import AutonomousSimsGame
+from src.phone.voice_chat_server import run_server
+import threading
+
+def main():
+    # Initialize and run the game
+    game = AutonomousSimsGame()
+    
+    # Start voice chat server in a separate thread
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Run the main game loop
+    game.run()
+
+if __name__ == "__main__":
+    main()
+```
 
 ## How It Works
 
