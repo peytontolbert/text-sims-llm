@@ -129,14 +129,6 @@ The system maintains detailed logs:
 - Action execution logs
 - Knowledge system state
 
-## Directory Structure
-```files
-├── logs/ # Log files
-├── states/ # Character state saves
-├── knowledge_store/# Persistent knowledge storage
-└── src/ # Source code
-
-
 ## Configuration
 
 The simulation can be configured through various parameters:
