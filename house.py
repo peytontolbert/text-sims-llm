@@ -51,9 +51,9 @@ class House:
             ),
             GameObject(
                 type=ObjectType.COMPUTER,
-                actions=['browse', 'play', 'work'],
-                need_effects={'fun': 25, 'social': 20, 'energy': -15},
-                description="A computer for various activities"
+                actions=['browse', 'play', 'work', 'code', 'run_code', 'write_journal', 'read_journal'],
+                need_effects={'fun': 25, 'social': 20, 'energy': -15, 'coding_skill': 10, 'emotional': 15},
+                description="A computer for various activities including coding and journaling"
             ),
             GameObject(
                 type=ObjectType.COUCH,

@@ -8,7 +8,11 @@ from llm_interface import LLMDecisionMaker
 from memory_system import Memory
 from needs_system import Needs
 from phone_system import PhoneSystem
+from coding_system import CodingSystem
+from journal_system import JournalSystem
+from knowledge_system import KnowledgeSystem
 import time
+from datetime import datetime
 
 class AutonomousCharacter:
     def __init__(self, name: str, house: House):
@@ -26,12 +30,46 @@ class AutonomousCharacter:
         self.needs_system = Needs()
         self.memory = Memory()
         self.current_room = self.house.get_room(self.position)
+        self.coding_system = CodingSystem(name)
+        self.journal_system = JournalSystem(name)
+        self.knowledge_system = KnowledgeSystem()
+        
+        # Add some initial knowledge
+        self._initialize_knowledge()
 
     @property
     def needs(self) -> Dict[str, float]:
         return self.needs_system.values
 
     def update(self, delta_time: float) -> str:
+        current_time = datetime.now()
+        
+        # Add current state as episodic memory with more context
+        state_memory = (
+            f"At {current_time.strftime('%H:%M')} in {self.current_room.value}. "
+            f"Urgent needs: {self.needs_system.get_urgent_needs()}. "
+            f"Last action: {self.action_history[-1] if self.action_history else 'None'}"
+        )
+        
+        self.knowledge_system.add_episodic_memory(
+            state_memory,
+            emotions=self.memory.get_emotional_context()
+        )
+        
+        # Detect and store periodic patterns
+        if len(self.action_history) >= 10:
+            recent_actions = self.action_history[-10:]
+            pattern = self._detect_patterns(recent_actions)
+            if pattern:
+                self.knowledge_system.add_periodic_pattern(
+                    pattern,
+                    "hourly",
+                    metadata={
+                        'time_of_day': current_time.strftime('%H:%M'),
+                        'needs_state': self.needs_system.get_need_status()
+                    }
+                )
+        
         # Update needs using the needs system
         self.needs_system.update(delta_time)
         
@@ -54,6 +92,12 @@ class AutonomousCharacter:
         self.memory.add_memory(
             f"Action result: {result}",
             importance=0.3
+        )
+        
+        # Store the result as episodic memory
+        self.knowledge_system.add_episodic_memory(
+            f"Action result: {result}",
+            emotions=self.memory.get_emotional_context()
         )
         
         self.thought = decision['thought']
@@ -138,7 +182,71 @@ class AutonomousCharacter:
         
         if target_object:
             if object_type == ObjectType.COMPUTER:
-                self.browser.browse('http://www.google.com')
+                if action == "code":
+                    # Generate a coding task based on character's context
+                    context = self._get_context()
+                    coding_prompt = self._generate_coding_prompt(context)
+                    
+                    # Use LLM to generate the code
+                    filename, content = self.coding_system.generate_code(coding_prompt)
+                    
+                    if filename and content:
+                        if self.coding_system.create_file(filename, content):
+                            self.memory.add_memory(
+                                f"Created a new program: {filename}",
+                                importance=0.7,
+                                emotions={"pride": 0.8, "creativity": 0.9}
+                            )
+                            return f"Created new Python file: {filename}"
+                    return "Failed to create Python file"
+
+                elif action == "run_code":
+                    files = self.coding_system.list_files()
+                    if not files:
+                        return "No Python files found"
+                    latest_file = max(files)
+                    success, output = self.coding_system.run_file(latest_file)
+                    
+                    # Record the result in memory
+                    if success:
+                        self.memory.add_memory(
+                            f"Successfully ran program {latest_file}",
+                            importance=0.6,
+                            emotions={"satisfaction": 0.7}
+                        )
+                        return f"Ran {latest_file} successfully:\n{output}"
+                    else:
+                        self.memory.add_memory(
+                            f"Failed to run program {latest_file}",
+                            importance=0.5,
+                            emotions={"frustration": 0.6}
+                        )
+                        return f"Failed to run {latest_file}: {output}"
+
+                elif action == "write_journal":
+                    # Generate journal content based on character's context
+                    context = self._get_context()
+                    journal_content = self._generate_journal_content(context)
+                    
+                    if self.journal_system.write_entry(journal_content):
+                        self.memory.add_memory(
+                            "Wrote in my journal about my thoughts and feelings",
+                            importance=0.6,
+                            emotions={"reflective": 0.8, "peaceful": 0.6}
+                        )
+                        return "Wrote a new journal entry"
+                    return "Failed to write journal entry"
+
+                elif action == "read_journal":
+                    entries = self.journal_system.read_entries(5)  # Read last 5 entries
+                    if entries:
+                        self.memory.add_memory(
+                            "Read through my past journal entries",
+                            importance=0.5,
+                            emotions={"nostalgic": 0.7, "reflective": 0.8}
+                        )
+                        return f"Read {len(entries)} journal entries"
+                    return "No journal entries found"
             elif object_type == ObjectType.PHONE:
                 # Initialize phone system if not exists
                 if not hasattr(self, 'phone_system'):
@@ -154,8 +262,81 @@ class AutonomousCharacter:
             return True
         return False
 
+    def _generate_coding_prompt(self, context: dict) -> str:
+        """Generate a coding prompt based on character's context"""
+        # Consider character's needs, memories, and current state
+        recent_memories = context.get('recent_memories', [])
+        emotional_state = context.get('emotional_state', {})
+        
+        # Example prompt generation
+        if "bored" in emotional_state or context['needs'].get('fun', 100) < 50:
+            return "Create a fun game or entertainment program"
+        elif context['needs'].get('social', 100) < 50:
+            return "Create a chatbot or social interaction program"
+        elif any("coding" in memory for memory in recent_memories):
+            return "Continue or improve upon previous coding project"
+        else:
+            return "Create a useful utility program or tool"
+
+    def _generate_journal_content(self, context: dict) -> dict:
+        """Generate journal content based on character's context"""
+        prompt = {
+            "task": "journal_entry",
+            "emotional_state": context.get('emotional_state', {}),
+            "recent_memories": context.get('recent_memories', []),
+            "needs": context.get('needs', {}),
+            "current_room": context.get('current_room', "unknown")
+        }
+        
+        # Get journal content from LLM
+        response = self.llm.generate_journal_entry(prompt)
+        
+        # Format the response with additional metadata
+        return {
+            "text": response.get("content", ""),
+            "mood": context.get('emotional_state', {}),
+            "tags": response.get("tags", []),
+            "related_memories": context.get('recent_memories', [])[:3]
+        }
+
     def handle_phone_call(self, message: str) -> str:
         """Handle incoming phone calls from the user"""
         if not hasattr(self, 'phone_system'):
             self.phone_system = PhoneSystem(self)
         return self.phone_system.start_call(message)
+
+    def _initialize_knowledge(self):
+        # Add basic semantic knowledge about the house and objects
+        for pos, room_type in self.house.rooms.items():
+            self.knowledge_system.add_semantic_knowledge(
+                f"The {room_type.value} is located at position ({pos.x}, {pos.y})",
+                metadata={'room_type': room_type.value}
+            )
+            
+        # Add knowledge about object effects
+        for pos, objects in self.house.objects.items():
+            for obj in objects:
+                self.knowledge_system.add_semantic_knowledge(
+                    f"The {obj.type.value} can be used for: {', '.join(obj.actions)}. Effects: {obj.need_effects}",
+                    metadata={'object_type': obj.type.value}
+                )
+                
+        # Add some periodic patterns
+        self.knowledge_system.add_periodic_pattern(
+            "Energy levels drop significantly after continuous computer use",
+            "frequent",
+            metadata={'need': 'energy'}
+        )
+
+    def _detect_patterns(self, actions: List[str]) -> Optional[str]:
+        """Analyze recent actions to detect patterns"""
+        # Simple pattern detection example
+        action_counts = {}
+        for action in actions:
+            action_counts[action] = action_counts.get(action, 0) + 1
+            
+        for action, count in action_counts.items():
+            if count >= 3:  # If same action appears 3+ times in last 10 actions
+                return f"Frequently performs action: {action}"
+                
+        return None

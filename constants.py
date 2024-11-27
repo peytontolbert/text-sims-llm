@@ -1,4 +1,3 @@
-
 # File: constants.py
 from enum import Enum
 

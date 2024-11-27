@@ -1,7 +1,7 @@
 # File: autonomous_game.py
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from house import House
 from autonomous_character import AutonomousCharacter
 import os
@@ -13,6 +13,8 @@ class AutonomousSimsGame:
         self.character = AutonomousCharacter("Alex", self.house)
         self.running = True
         self.last_update = time.time()
+        self.last_knowledge_save = time.time()
+        self.knowledge_save_interval = 300  # Save knowledge every 5 minutes
         
         # Set up logging
         self.setup_logging()
@@ -53,6 +55,12 @@ class AutonomousSimsGame:
         current_time = time.time()
         delta_time = current_time - self.last_update
         
+        # Check if it's time to save knowledge
+        if current_time - self.last_knowledge_save >= self.knowledge_save_interval:
+            self.logger.info("Saving knowledge system state...")
+            self.character.knowledge_system.save_state()
+            self.last_knowledge_save = current_time
+        
         # Log the current state before update
         self.logger.info("\nCurrent State:")
         self.logger.info(f"Location: {self.character.current_room}")
@@ -92,6 +100,9 @@ class AutonomousSimsGame:
         # Save to JSON file
         with open(f'states/character_state_{timestamp}.json', 'w') as f:
             json.dump(state, f, indent=4)
+            
+        # Also save knowledge system state when saving character state
+        self.character.knowledge_system.save_state()
 
     def run(self):
         self.logger.info("Starting Autonomous Sims Simulation...")

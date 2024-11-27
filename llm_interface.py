@@ -6,6 +6,7 @@ import json
 from dotenv import load_dotenv
 from datetime import datetime
 import time
+from knowledge_system import KnowledgeSystem
 
 load_dotenv()
 
@@ -14,15 +15,17 @@ class LLMDecisionMaker:
         self.api_key = os.getenv('OPENAI_API_KEY')
         self.client = openai.OpenAI(api_key=self.api_key)
         self.conversation_history = []
+        self.knowledge_system = KnowledgeSystem()
 
     def make_decision(self, context: Dict) -> Dict:
-        prompt = self._create_prompt(context)
+        knowledge_context = self._get_relevant_knowledge(context)
+        enhanced_prompt = self._create_enhanced_prompt(context, knowledge_context)
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4-0613",
                 messages=[
-                    {"role": "system", "content": "You are an AI controlling a Sim character in a simulation game. You make decisions based on the Sim's needs, surroundings, and previous actions. Respond in JSON format with 'action', 'target', and 'thought' fields."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "You are an AI controlling a Sim character in a simulation game. Make decisions based on the character's needs, surroundings, previous actions, and accumulated knowledge."},
+                    {"role": "user", "content": enhanced_prompt}
                 ],
                 temperature=0.7,
                 max_tokens=150
@@ -30,11 +33,17 @@ class LLMDecisionMaker:
             
             decision = json.loads(response.choices[0].message.content)
             
+            # Store the decision as episodic memory
+            self.knowledge_system.add_episodic_memory(
+                f"Decided to {decision['action']} {decision['target']} because {decision['thought']}",
+                emotions=context.get('emotional_state', {})
+            )
+            
             # Log the full context and response
             log_entry = {
                 'timestamp': datetime.now().isoformat(),
                 'context': context,
-                'prompt': prompt,
+                'prompt': enhanced_prompt,
                 'response': response.choices[0].message.content,
                 'decision': decision
             }
@@ -54,6 +63,33 @@ class LLMDecisionMaker:
         except Exception as e:
             print(f"Error in LLM decision making: {e}")
             return {"action": "idle", "target": None, "thought": "I'm not sure what to do..."}
+
+    def _get_relevant_knowledge(self, context: Dict) -> Dict:
+        """Query knowledge system for relevant information"""
+        query = f"Current room: {context['current_room']}. Needs: {context['urgent_needs']}. Recent actions: {context['recent_actions'][-1] if context['recent_actions'] else 'none'}"
+        return self.knowledge_system.query_knowledge(query)
+
+    def _create_enhanced_prompt(self, context: Dict, knowledge: Dict) -> str:
+        prompt = self._create_prompt(context)  # Original prompt creation
+        
+        # Add knowledge context
+        knowledge_section = """
+Relevant Knowledge:
+Semantic (Facts & Concepts):
+{}
+
+Recent Experiences:
+{}
+
+Recurring Patterns:
+{}
+""".format(
+            "\n".join(f"- {m['content']}" for m in knowledge['semantic'][:3]),
+            "\n".join(f"- {m['content']}" for m in knowledge['episodic'][:3]),
+            "\n".join(f"- {m['content']}" for m in knowledge['periodic'][:3])
+        )
+        
+        return prompt + "\n" + knowledge_section
 
     def _create_prompt(self, context: Dict) -> str:
         return f"""
@@ -134,3 +170,62 @@ The person on the phone says: "{context['user_message']}"
 
 Respond naturally to this message, considering your current emotional state and needs.
 """
+
+    def generate_code(self, context: dict) -> dict:
+        """Generate code based on the given context"""
+        prompt = f"""
+        As an AI programmer, create a Python program based on the following context:
+        Task: {context['prompt']}
+        Previous files: {context['previous_files']}
+        
+        Respond with a JSON object containing:
+        1. A suitable filename
+        2. A brief description of the program
+        3. The complete Python code
+        
+        The code should be:
+        - Self-contained and runnable
+        - Safe and without system-level operations
+        - Well-commented and clear
+        - Appropriate for the character's current context
+        """
+        
+        response = self._get_llm_response(prompt)
+        try:
+            # Process and validate the response
+            # Ensure it contains required fields and safe code
+            return response
+        except Exception as e:
+            self.logger.error(f"Error in code generation: {str(e)}")
+            return None
+
+    def generate_journal_entry(self, context: dict) -> dict:
+        """Generate a journal entry based on the given context"""
+        prompt = f"""
+        As an AI character writing in their journal, create an entry based on:
+        Emotional state: {context['emotional_state']}
+        Recent experiences: {context['recent_memories']}
+        Current needs: {context['needs']}
+        Location: {context['current_room']}
+
+        Write a personal and reflective journal entry that:
+        1. Expresses thoughts and feelings
+        2. Reflects on recent experiences
+        3. Considers current state and needs
+        4. Sets goals or intentions
+
+        Respond with a JSON object containing:
+        1. The journal entry content
+        2. Relevant tags for the entry
+        """
+        
+        response = self._get_llm_response(prompt)
+        try:
+            # Process and validate the response
+            return {
+                "content": response.get("content", ""),
+                "tags": response.get("tags", [])
+            }
+        except Exception as e:
+            self.logger.error(f"Error in journal generation: {str(e)}")
+            return {"content": "Failed to generate journal entry", "tags": []}
