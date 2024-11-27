@@ -1,7 +1,7 @@
 # File: models.py
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-from constants import Direction, ObjectType
+from src.utils.constants import Direction, ObjectType
 
 @dataclass(frozen=True)
 class Position:

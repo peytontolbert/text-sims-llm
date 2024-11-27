@@ -1,16 +1,16 @@
 # File: autonomous_character.py
 from typing import Dict, List, Optional
-from models import Position
-from constants import Direction, ObjectType
-from house import House
-from browser_interface import BrowserInterface
-from llm_interface import LLMDecisionMaker
-from memory_system import Memory
-from needs_system import Needs
-from phone_system import PhoneSystem
-from coding_system import CodingSystem
-from journal_system import JournalSystem
-from knowledge_system import KnowledgeSystem
+from src.utils.models import Position
+from src.utils.constants import Direction, ObjectType
+from src.environment.house import House
+from src.computer.browser_interface import BrowserInterface
+from src.llm.llm_interface import LLMDecisionMaker
+from src.memory.memory_system import Memory
+from src.character.needs_system import Needs
+from src.phone.phone_system import PhoneSystem
+from src.computer.coding_system import CodingSystem
+from src.computer.journal_system import JournalSystem
+from src.memory.knowledge_system import KnowledgeSystem
 import time
 from datetime import datetime
 

@@ -1,4 +1,10 @@
 .env
 states/
 logs/
+knowledge_store/
+character_files/
+speech_files/
+states/
 __pycache__/
+*.__pycache__
+*.pyc

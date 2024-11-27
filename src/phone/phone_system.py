@@ -1,8 +1,8 @@
 from typing import Dict, Optional
 import time
-from llm_interface import LLMDecisionMaker
-from whisper_manager import WhisperManager
-from speech import Speech
+from src.llm.llm_interface import LLMDecisionMaker
+from src.ears.whisper_manager import WhisperManager
+from src.voice.speech import Speech
 import numpy as np
 import logging
 
@@ -24,11 +24,16 @@ class PhoneSystem:
         self.in_call = False
         return response
         
-    def start_call(self):
+    def start_call(self) -> dict:
         """Start a voice call with the character"""
         try:
+            if self.in_call:
+                return {
+                    "success": False,
+                    "message": "Already in a call"
+                }
+            
             self.in_call = True
-            self.whisper.start_call()
             
             # Add memory of starting the call
             self.character.memory.add_memory(
@@ -39,11 +44,17 @@ class PhoneSystem:
             
             # Generate greeting response
             greeting = self._process_message("Hello")
+            
+            # Convert greeting to speech using the correct method
+            audio_path = self.speech.complete_task(greeting)
+            
             return {
                 "success": True,
                 "message": "Call started",
-                "greeting": greeting
+                "greeting": greeting,
+                "audio_path": str(audio_path)
             }
+            
         except Exception as e:
             logger.error(f"Error starting call: {e}")
             self.in_call = False
@@ -160,4 +171,45 @@ class PhoneSystem:
             'response': response,
             'emotional_state': self.character.memory.get_emotional_context()
         })
+        
+    def handle_voice_message(self, audio_data: np.ndarray, sample_rate: int) -> dict:
+        """Handle incoming voice message during call"""
+        if not self.in_call:
+            return {
+                "success": False,
+                "error": "Not in a call. Please start a call first."
+            }
+        
+        try:
+            # Transcribe incoming audio using whisper
+            transcription = self.whisper.transcribe_audio({
+                "array": audio_data,
+                "sampling_rate": sample_rate
+            })
+            
+            if not transcription or transcription == "No speech detected.":
+                return {
+                    "success": False,
+                    "error": "No speech detected"
+                }
+            
+            # Process the message and get response
+            text_response = self._process_message(transcription)
+            
+            # Convert response to speech using the correct method
+            audio_path = self.speech.complete_task(text_response)
+            
+            return {
+                "success": True,
+                "transcription": transcription,
+                "text_response": text_response,
+                "audio_path": str(audio_path)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing voice message: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     

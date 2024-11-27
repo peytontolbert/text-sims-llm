@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Character Voice Call</title>
+    <style>
+        .call-container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            font-family: Arial, sans-serif;
+        }
+        .transcript {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            min-height: 100px;
+            max-height: 400px;
+            overflow-y: auto;
+            text-align: left;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        .status {
+            margin: 10px;
+            font-weight: bold;
+            color: #333;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+        }
+        .status-indicators {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 15px 0;
+        }
+        
+        .indicator {
+            display: flex;
+            align-items: center;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        
+        .indicator .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .recording-indicator {
+            background-color: #ffebee;
+            display: none;
+        }
+        
+        .recording-indicator .dot {
+            background-color: #f44336;
+            animation: pulse 1s infinite;
+        }
+        
+        .speaking-indicator {
+            background-color: #e8f5e9;
+            display: none;
+        }
+        
+        .speaking-indicator .dot {
+            background-color: #4caf50;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .conversation-entry {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+        }
+        .character-message {
+            background-color: #f5f5f5;
+        }
+        .house-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .house-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .room {
+            border: 2px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: white;
+            min-height: 100px;
+            position: relative;
+            transition: background-color 0.3s;
+        }
+
+        .room.active {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .room-label {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .room-objects {
+            font-size: 1.5em;
+            margin-top: 10px;
+        }
+
+        .character-status {
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+        }
+
+        .thoughts-container {
+            margin-top: 20px;
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        #thoughtsList {
+            display: flex;
+            flex-direction: column-reverse;
+        }
+
+        .thought-entry {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+        }
+
+        .thought-entry:last-child {
+            border-bottom: none;
+        }
+
+        .character-marker {
+            position: absolute;
+            background-color: #ff4081;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="call-container">
+        <h1>Call Character</h1>
+        <div class="status" id="status">Ready to call</div>
+        <div class="status-indicators">
+            <div class="indicator recording-indicator" id="recordingIndicator">
+                <div class="dot"></div>
+                <span>Recording...</span>
+            </div>
+            <div class="indicator speaking-indicator" id="speakingIndicator">
+                <div class="dot"></div>
+                <span>Character Speaking...</span>
+            </div>
+        </div>
+        <button id="callButton">Start Call</button>
+        <button id="hangupButton" disabled>Hang Up</button>
+        <div class="transcript">
+            <h3>Conversation</h3>
+            <div id="transcriptText"></div>
+        </div>
+    </div>
+
+    <div class="house-container">
+        <h2>Character Location & Status</h2>
+        <div class="house-grid">
+            <div class="room" id="bedroom">
+                <div class="room-label">Bedroom</div>
+                <div class="room-objects">🛏️</div>
+            </div>
+            <div class="room" id="bathroom">
+                <div class="room-label">Bathroom</div>
+                <div class="room-objects">🚿🚽</div>
+            </div>
+            <div class="room" id="living-room">
+                <div class="room-label">Living Room</div>
+                <div class="room-objects">📺💻🛋️📱</div>
+            </div>
+            <div class="room" id="kitchen">
+                <div class="room-label">Kitchen</div>
+                <div class="room-objects">🍳🗄️</div>
+            </div>
+        </div>
+        <div class="character-status">
+            <h3>Current Status</h3>
+            <p>Location: <span id="currentRoom">-</span></p>
+            <p>Activity: <span id="currentActivity">-</span></p>
+        </div>
+        <div class="thoughts-container">
+            <h3>Recent Thoughts</h3>
+            <div id="thoughtsList"></div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isInCall = false;
+        let audioContext;
+        let isProcessing = false;
+        let isSpeaking = false;
+        let isRecording = false;
+        let isCallActive = false;
+
+        const callButton = document.getElementById('callButton');
+        const hangupButton = document.getElementById('hangupButton');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcriptText');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const speakingIndicator = document.getElementById('speakingIndicator');
+
+        async function initializeAudioContext() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            await audioContext.resume();
+        }
+
+        async function startCall() {
+            try {
+                await initializeAudioContext();
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000
+                    } 
+                });
+                
+                mediaRecorder = new MediaRecorder(stream);
+                
+                // Start the call on the server
+                const response = await fetch('http://localhost:5000/start-call', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    isCallActive = true;
+                    isRecording = true;
+                    status.textContent = 'In Call';
+                    callButton.disabled = true;
+                    hangupButton.disabled = false;
+                    recordingIndicator.style.display = 'flex';
+                    
+                    // Set up the media recorder
+                    mediaRecorder.ondataavailable = handleAudioData;
+                    mediaRecorder.start(1000); // Collect data every second
+                    
+                    // Play greeting if provided
+                    if (result.greeting) {
+                        speakingIndicator.style.display = 'flex';
+                        updateTranscript('', result.greeting);
+                        if (result.audio_response) {
+                            await playAudioResponse(result.audio_response);
+                        }
+                        speakingIndicator.style.display = 'none';
+                    }
+                    
+                    startPolling();
+                } else {
+                    throw new Error(result.error || 'Failed to start call');
+                }
+            } catch (error) {
+                console.error('Error starting call:', error);
+                status.textContent = 'Error: ' + error.message;
+                await endCall();
+            }
+        }
+
+        async function handleAudioData(event) {
+            if (!isCallActive || isProcessing) return;
+            
+            try {
+                isProcessing = true;
+                audioChunks.push(event.data);
+                
+                if (audioChunks.length >= 2) { // Process every 2 seconds
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    const audioData = await audioContext.decodeAudioData(arrayBuffer);
+                    const float32Array = audioData.getChannelData(0);
+                    
+                    // Only process if there's actual audio content
+                    if (hasAudioContent(float32Array)) {
+                        recordingIndicator.style.display = 'none';
+                        
+                        const formData = new FormData();
+                        const float32Buffer = new Float32Array(float32Array).buffer;
+                        formData.append('audio', new Blob([float32Buffer], { type: 'application/octet-stream' }));
+                        
+                        const response = await fetch('http://localhost:5000/voice-message', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success) {
+                            updateTranscript(result.transcription, result.text_response);
+                            if (result.audio_response) {
+                                isRecording = false;
+                                speakingIndicator.style.display = 'flex';
+                                await playAudioResponse(result.audio_response);
+                                speakingIndicator.style.display = 'none';
+                                isRecording = true;
+                            }
+                        }
+                    }
+                    
+                    audioChunks = [];
+                    recordingIndicator.style.display = 'flex';
+                }
+            } catch (error) {
+                console.error('Error processing audio:', error);
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        async function endCall() {
+            if (mediaRecorder && isCallActive) {
+                isCallActive = false;
+                isRecording = false;
+                
+                // Stop recording
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                try {
+                    const response = await fetch('http://localhost:5000/end-call', { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success && result.farewell) {
+                        speakingIndicator.style.display = 'flex';
+                        updateTranscript('', result.farewell);
+                        if (result.audio_response) {
+                            await playAudioResponse(result.audio_response);
+                        }
+                        speakingIndicator.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.error('Error ending call:', error);
+                } finally {
+                    // Reset UI state
+                    status.textContent = 'Call Ended';
+                    callButton.disabled = false;
+                    hangupButton.disabled = true;
+                    recordingIndicator.style.display = 'none';
+                    speakingIndicator.style.display = 'none';
+                    audioChunks = [];
+                    
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                    }
+                }
+            }
+        }
+
+        function updateTranscript(userText, responseText) {
+            const userEntry = document.createElement('div');
+            userEntry.className = 'conversation-entry user-message';
+            userEntry.innerHTML = `<strong>You:</strong> ${userText}`;
+            
+            const characterEntry = document.createElement('div');
+            characterEntry.className = 'conversation-entry character-message';
+            characterEntry.innerHTML = `<strong>Character:</strong> ${responseText}`;
+            
+            transcript.appendChild(userEntry);
+            transcript.appendChild(characterEntry);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        async function playAudioResponse(audioData) {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    const audioBuffer = audioContext.createBuffer(1, audioData.length, 16000);
+                    audioBuffer.getChannelData(0).set(new Float32Array(audioData));
+                    
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    
+                    source.onended = () => {
+                        resolve();
+                    };
+                    
+                    source.start(0);
+                } catch (error) {
+                    console.error('Error playing audio:', error);
+                    reject(error);
+                }
+            });
+        }
+
+        // Event Listeners
+        callButton.addEventListener('click', startCall);
+        hangupButton.addEventListener('click', endCall);
+
+        // Handle page unload
+        window.addEventListener('beforeunload', async () => {
+            if (isCallActive) {
+                await endCall();
+            }
+        });
+
+        function updateCharacterLocation(room) {
+            // Remove active class from all rooms
+            document.querySelectorAll('.room').forEach(el => {
+                el.classList.remove('active');
+                // Remove any existing character markers
+                const marker = el.querySelector('.character-marker');
+                if (marker) marker.remove();
+            });
+
+            // Add active class and character marker to current room
+            const roomElement = document.getElementById(room.toLowerCase().replace('_', '-'));
+            if (roomElement) {
+                roomElement.classList.add('active');
+                const marker = document.createElement('div');
+                marker.className = 'character-marker';
+                marker.textContent = '👤';
+                roomElement.appendChild(marker);
+            }
+
+            // Update status text
+            document.getElementById('currentRoom').textContent = room.replace('_', ' ');
+        }
+
+        function updateCharacterActivity(activity) {
+            document.getElementById('currentActivity').textContent = activity;
+        }
+
+        function addThought(thought) {
+            const thoughtsList = document.getElementById('thoughtsList');
+            const thoughtEntry = document.createElement('div');
+            thoughtEntry.className = 'thought-entry';
+            thoughtEntry.textContent = thought;
+            
+            thoughtsList.insertBefore(thoughtEntry, thoughtsList.firstChild);
+            
+            // Keep only the 10 most recent thoughts
+            while (thoughtsList.children.length > 10) {
+                thoughtsList.removeChild(thoughtsList.lastChild);
+            }
+        }
+
+        // Modify the polling function to be more robust
+        async function pollCharacterStatus() {
+            try {
+                const response = await fetch('http://localhost:5000/character-status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update room location
+                    updateCharacterLocation(data.room);
+                    
+                    // Update current activity
+                    updateCharacterActivity(data.activity || 'Idle');
+                    
+                    // Update thought if provided
+                    if (data.thought) {
+                        addThought(data.thought);
+                    }
+                    
+                    // Update call status if needed
+                    if (data.in_call !== undefined) {
+                        isInCall = data.in_call;
+                        status.textContent = isInCall ? 'In Call' : 'Ready to call';
+                        callButton.disabled = isInCall;
+                        hangupButton.disabled = !isInCall;
+                    }
+                }
+            } catch (error) {
+                console.error('Error polling character status:', error);
+            }
+        }
+
+        // Start polling only when needed
+        let pollInterval;
+
+        // Add function to start polling
+        function startPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+            pollCharacterStatus();
+            pollInterval = setInterval(() => {
+                if (isCallActive) {
+                    pollCharacterStatus();
+                }
+            }, 3000);
+        }
+
+        // Add helper function to check for actual audio content
+        function hasAudioContent(audioData, threshold = 0.01) {
+            const rms = Math.sqrt(audioData.reduce((sum, x) => sum + x * x, 0) / audioData.length);
+            return rms > threshold;
+        }
+    </script>
+</body>
+</html> 

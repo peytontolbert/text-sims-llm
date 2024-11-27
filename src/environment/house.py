@@ -1,7 +1,7 @@
 # File: house.py
 from typing import Dict, List, Optional
-from models import Position, GameObject
-from constants import RoomType, ObjectType
+from src.utils.models import Position, GameObject
+from src.utils.constants import RoomType, ObjectType
 from collections import defaultdict
 
 class House:

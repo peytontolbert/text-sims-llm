@@ -4,9 +4,9 @@ import numpy as np
 import json
 import logging
 from typing import Optional
-from whisper_manager import WhisperManager
-from speech import Speech
-from phone_system import PhoneSystem
+from src.ears.whisper_manager import WhisperManager
+from src.voice.speech import Speech
+from src.phone.phone_system import PhoneSystem
 import sounddevice as sd
 import soundfile as sf
 import io
@@ -24,11 +24,15 @@ class VoiceChatServer:
     def __init__(self):
         self.whisper = WhisperManager()
         self.speech = Speech()
-        self.phone_system = None  # Will be initialized with character reference
+        self.phone_system = None
+        self.character = None
         
     def initialize_phone_system(self, character):
+        """Initialize phone system with character reference"""
+        self.character = character
         self.phone_system = PhoneSystem(character)
-        
+        return {"success": True, "message": "Phone system initialized"}
+
     def process_voice_message(self, audio_data: np.ndarray, sample_rate: int) -> dict:
         """Process incoming voice message and return character's response"""
         try:
@@ -76,9 +80,10 @@ def initialize():
     try:
         data = request.json
         character = data.get('character')
-        voice_server.initialize_phone_system(character)
-        return jsonify({"success": True})
+        result = voice_server.initialize_phone_system(character)
+        return jsonify(result)
     except Exception as e:
+        logger.error(f"Error initializing phone system: {e}")
         return jsonify({"success": False, "error": str(e)})
 
 @app.route('/voice-message', methods=['POST'])
@@ -102,6 +107,10 @@ def receive_voice_message():
         # Process the voice message
         response = voice_server.process_voice_message(audio_data, sample_rate)
         
+        # Ensure the call stays active
+        if response.get('success'):
+            voice_server.phone_system.in_call = True
+            
         return jsonify(response)
         
     except Exception as e:
@@ -118,12 +127,16 @@ def receive_text_message():
         response = voice_server.phone_system.handle_text_call(message)
         
         # Convert response to speech
-        audio_response = voice_server.speech.text_to_speech(response)
+        audio_path = voice_server.speech.complete_task(response)
+        
+        # Read the audio file
+        with open(str(audio_path), 'rb') as audio_file:
+            audio_data = audio_file.read()
         
         return jsonify({
             "success": True,
             "text_response": response,
-            "audio_response": audio_response.tolist()
+            "audio_data": audio_data
         })
         
     except Exception as e:
@@ -133,8 +146,14 @@ def receive_text_message():
 @app.route('/start-call', methods=['POST'])
 def start_call():
     try:
+        if not voice_server.phone_system:
+            return jsonify({
+                "success": False, 
+                "error": "Phone system not initialized. Please initialize first."
+            })
+            
         response = voice_server.phone_system.start_call()
-        return jsonify({"success": True, "message": response})
+        return jsonify(response)
     except Exception as e:
         logger.error(f"Error starting call: {e}")
         return jsonify({"success": False, "error": str(e)})

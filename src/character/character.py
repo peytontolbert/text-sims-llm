@@ -2,10 +2,10 @@
 # File: character.py
 import time
 from typing import Optional, Dict, List
-from models import Position
-from constants import Direction, ObjectType
-from house import House
-from browser_interface import BrowserInterface
+from src.utils.models import Position
+from src.utils.constants import Direction, ObjectType
+from src.environment.house import House
+from src.computer.browser_interface import BrowserInterface
 
 class SimCharacter:
     def __init__(self, name: str, house: House):

@@ -1,6 +1,6 @@
 import time
-from autonomous_game import AutonomousSimsGame
-from voice_chat_server import run_server
+from src.game.autonomous_game import AutonomousSimsGame
+from src.phone.voice_chat_server import run_server
 import threading
 
 if __name__ == "__main__":

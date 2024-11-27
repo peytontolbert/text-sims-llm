@@ -6,7 +6,7 @@ import json
 from dotenv import load_dotenv
 from datetime import datetime
 import time
-from knowledge_system import KnowledgeSystem
+from src.memory.knowledge_system import KnowledgeSystem
 
 load_dotenv()
 

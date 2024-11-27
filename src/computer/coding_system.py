@@ -2,7 +2,7 @@ import os
 import subprocess
 import logging
 from datetime import datetime
-from llm_interface import LLMDecisionMaker
+from src.llm.llm_interface import LLMDecisionMaker
 
 class CodingSystem:
     def __init__(self, character_name: str):

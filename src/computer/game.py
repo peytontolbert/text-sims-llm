@@ -2,9 +2,9 @@
 # File: game.py
 import time
 from typing import Optional
-from house import House
-from character import SimCharacter
-from constants import Direction, ObjectType
+from environment.house import House
+from src.character.character import SimCharacter
+from src.utils.constants import Direction, ObjectType
 
 class SimsGame:
     def __init__(self):

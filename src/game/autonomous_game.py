@@ -2,15 +2,20 @@
 import time
 import logging
 from datetime import datetime, timedelta
-from house import House
-from autonomous_character import AutonomousCharacter
+from src.environment.house import House
+from src.character.autonomous_character import AutonomousCharacter
 import os
 import json
+from src.phone.voice_chat_server import voice_server
 
 class AutonomousSimsGame:
     def __init__(self):
         self.house = House()
-        self.character = AutonomousCharacter("Alex", self.house)
+        self.character = AutonomousCharacter("AI Character", self.house)
+        
+        # Initialize voice server with character reference
+        voice_server.initialize_phone_system(self.character)
+        
         self.running = True
         self.last_update = time.time()
         self.last_knowledge_save = time.time()

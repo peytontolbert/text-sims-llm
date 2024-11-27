@@ -1,4 +1,4 @@
-from browser import BrowserController
+from src.computer.browser import BrowserController
 class BrowserInterface:
     def __init__(self):
         self.browser = None
