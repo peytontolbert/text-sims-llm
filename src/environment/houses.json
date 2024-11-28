@@ -1,0 +1,218 @@
+{
+    "house_1": {
+        "id": "house_1",
+        "name": "Cozy Starter Home",
+        "position": {
+            "x": 0,
+            "y": 0
+        },
+        "owner": "AI Character",
+        "price": 20000,
+        "rooms": {
+            "hallway": {
+                "type": "HALLWAY",
+                "position": {
+                    "x": 0,
+                    "y": -1
+                },
+                "objects": [
+                    "door"
+                ]
+            },
+            "bedroom": {
+                "type": "BEDROOM",
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "objects": [
+                    "bed"
+                ]
+            },
+            "bathroom": {
+                "type": "BATHROOM",
+                "position": {
+                    "x": 1,
+                    "y": 0
+                },
+                "objects": [
+                    "toilet",
+                    "shower"
+                ]
+            },
+            "living_room": {
+                "type": "LIVING_ROOM",
+                "position": {
+                    "x": 0,
+                    "y": 1
+                },
+                "objects": [
+                    "tv",
+                    "computer",
+                    "couch",
+                    "phone"
+                ]
+            },
+            "kitchen": {
+                "type": "KITCHEN",
+                "position": {
+                    "x": 1,
+                    "y": 1
+                },
+                "objects": [
+                    "fridge",
+                    "stove"
+                ]
+            }
+        },
+        "description": "A comfortable starter home perfect for a single sim."
+    },
+    "house_2": {
+        "id": "house_2",
+        "name": "Modern Studio",
+        "position": {
+            "x": 2,
+            "y": 0
+        },
+        "owner": null,
+        "price": 15000,
+        "rooms": {
+            "hallway": {
+                "type": "HALLWAY",
+                "position": {
+                    "x": 0,
+                    "y": -1
+                },
+                "objects": [
+                    "door"
+                ]
+            },
+            "studio": {
+                "type": "LIVING_ROOM",
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "objects": [
+                    "bed",
+                    "tv",
+                    "computer",
+                    "couch",
+                    "phone"
+                ]
+            },
+            "bathroom": {
+                "type": "BATHROOM",
+                "position": {
+                    "x": 1,
+                    "y": 0
+                },
+                "objects": [
+                    "toilet",
+                    "shower"
+                ]
+            },
+            "kitchen": {
+                "type": "KITCHEN",
+                "position": {
+                    "x": 0,
+                    "y": 1
+                },
+                "objects": [
+                    "fridge",
+                    "stove"
+                ]
+            }
+        },
+        "description": "A compact modern studio apartment."
+    },
+    "house_3": {
+        "id": "house_3",
+        "name": "Family Home",
+        "position": {
+            "x": -2,
+            "y": 0
+        },
+        "owner": null,
+        "price": 35000,
+        "rooms": {
+            "hallway": {
+                "type": "HALLWAY",
+                "position": {
+                    "x": 0,
+                    "y": -1
+                },
+                "objects": [
+                    "door"
+                ]
+            },
+            "master_bedroom": {
+                "type": "BEDROOM",
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "objects": [
+                    "bed"
+                ]
+            },
+            "bathroom_1": {
+                "type": "BATHROOM",
+                "position": {
+                    "x": 1,
+                    "y": 0
+                },
+                "objects": [
+                    "toilet",
+                    "shower"
+                ]
+            },
+            "living_room": {
+                "type": "LIVING_ROOM",
+                "position": {
+                    "x": 0,
+                    "y": 1
+                },
+                "objects": [
+                    "tv",
+                    "computer",
+                    "couch",
+                    "phone"
+                ]
+            },
+            "kitchen": {
+                "type": "KITCHEN",
+                "position": {
+                    "x": 1,
+                    "y": 1
+                },
+                "objects": [
+                    "fridge",
+                    "stove"
+                ]
+            },
+            "bedroom_2": {
+                "type": "BEDROOM",
+                "position": {
+                    "x": -1,
+                    "y": 0
+                },
+                "objects": [
+                    "bed"
+                ]
+            },
+            "bathroom_2": {
+                "type": "BATHROOM",
+                "position": {
+                    "x": -1,
+                    "y": 1
+                },
+                "objects": [
+                    "toilet",
+                    "shower"
+                ]
+            }
+        },
+        "description": "A spacious family home with multiple bedrooms and bathrooms."
+    }
+}

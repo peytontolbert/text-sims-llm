@@ -1,7 +1,7 @@
 # File: models.py
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
-from src.utils.constants import Direction, ObjectType
+from typing import Dict, List, Optional, Tuple, Callable
+from src.utils.constants import Direction, ObjectType, ActivityState, ActivityType
 
 @dataclass(frozen=True)
 class Position:
@@ -27,8 +27,16 @@ class Position:
         return Position(self.x + dx, self.y + dy)
 
 @dataclass
+class ActivityInfo:
+    type: ActivityType
+    duration: float
+    need_changes: Dict[str, float]
+    exit_condition: Optional[Callable[['Activity'], bool]] = None
+
+@dataclass
 class GameObject:
     type: ObjectType
     actions: List[str]
     need_effects: Dict[str, float]
     description: str
+    activity_info: Optional[ActivityInfo] = None

@@ -1,0 +1,47 @@
+{
+    "characters": {
+        "AI Character": {
+            "position": {
+                "x": 0,
+                "y": 0
+            },
+            "home_position": {
+                "x": 0,
+                "y": 0
+            },
+            "last_active": "2024-11-27T20:54:53.654322",
+            "status": "active"
+        }
+    },
+    "time": {
+        "current_time": 8.0,
+        "day": 1,
+        "season": "spring",
+        "year": 1
+    },
+    "weather": {
+        "current": "sunny",
+        "temperature": 22,
+        "conditions": []
+    },
+    "buildings": {
+        "supermarket": {
+            "position": {
+                "x": 2,
+                "y": 0
+            },
+            "status": "open",
+            "current_visitors": [],
+            "inventory_last_restocked": "2024-11-27T20:54:53.654322"
+        }
+    },
+    "events": {
+        "scheduled": [],
+        "active": []
+    },
+    "metadata": {
+        "last_saved": "2024-11-27T20:54:53.654322",
+        "version": "1.0",
+        "game_days_elapsed": 0
+    }
+}

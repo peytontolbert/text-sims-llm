@@ -1,0 +1,80 @@
+{
+    "plots": {
+        "residential_area": {
+            "plot_0_0": {
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "type": "HOUSE",
+                "owner": "AI Character",
+                "locked": false,
+                "allowed_visitors": []
+            },
+            "plot_0_1": {
+                "position": {
+                    "x": 0,
+                    "y": 1
+                },
+                "type": "HOUSE",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            },
+            "plot_0_2": {
+                "position": {
+                    "x": 0,
+                    "y": 2
+                },
+                "type": "HOUSE",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            }
+        },
+        "commercial_area": {
+            "plot_2_0": {
+                "position": {
+                    "x": 2,
+                    "y": 0
+                },
+                "type": "SUPERMARKET",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            }
+        },
+        "empty_plots": {
+            "plot_2_1": {
+                "position": {
+                    "x": 2,
+                    "y": 1
+                },
+                "type": "EMPTY",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            },
+            "plot_2_2": {
+                "position": {
+                    "x": 2,
+                    "y": 2
+                },
+                "type": "EMPTY",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            },
+            "plot_1_2": {
+                "position": {
+                    "x": 1,
+                    "y": 2
+                },
+                "type": "EMPTY",
+                "owner": null,
+                "locked": false,
+                "allowed_visitors": []
+            }
+        }
+    }
+}

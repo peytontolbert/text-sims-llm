@@ -1,8 +1,7 @@
 from src.computer.browser import BrowserController
 class BrowserInterface:
     def __init__(self):
-        self.browser = None
-        self.current_url = None
+        self.browser = BrowserController()
 
     def initialize(self):
         if not self.browser:
@@ -21,3 +20,7 @@ class BrowserInterface:
             self.browser.close()
             self.browser = None
             self.current_url = None
+
+    def speak(self, text):
+        """Speak through the browser's virtual microphone"""
+        return self.browser.speak_through_mic(text)

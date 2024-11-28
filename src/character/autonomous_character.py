@@ -11,20 +11,30 @@ from src.phone.phone_system import PhoneSystem
 from src.computer.coding_system import CodingSystem
 from src.computer.journal_system import JournalSystem
 from src.memory.knowledge_system import KnowledgeSystem
+from src.ears.whisper_manager import WhisperManager
+from src.voice.speech import Speech
+from src.voice.voice_manager import VoiceManager
 import time
 from datetime import datetime
+from pathlib import Path
+from src.environment.activities import ActivityManager
+import logging
+import threading
 
 class AutonomousCharacter:
     def __init__(self, name: str, house: House):
         self.name = name
         self.position = Position(0, 0)
         self.house = house
-        self.browser = BrowserInterface()
         self.current_action = None
         self.thought = None
         self.last_action_time = time.time()
         self.decision_maker = LLMDecisionMaker()
         self.action_history = []
+        
+        # Initialize browser as None - will be created when needed
+        self.browser = None
+        self.browser_thread = None
         
         # Replace direct needs dict with Needs system
         self.needs_system = Needs()
@@ -33,6 +43,10 @@ class AutonomousCharacter:
         self.coding_system = CodingSystem(name)
         self.journal_system = JournalSystem(name)
         self.knowledge_system = KnowledgeSystem()
+        self.ears = WhisperManager()
+        self.voice_manager = VoiceManager()
+        self.activity_manager = ActivityManager()
+        self.current_activity_context = None
         
         # Add some initial knowledge
         self._initialize_knowledge()
@@ -41,86 +55,149 @@ class AutonomousCharacter:
     def needs(self) -> Dict[str, float]:
         return self.needs_system.values
 
+    @property
+    def is_busy(self) -> bool:
+        return self.activity_manager.is_busy
+
+    @property
+    def needs_activity_exit(self) -> bool:
+        return self.activity_manager.needs_exit
+
     def update(self, delta_time: float) -> str:
-        current_time = datetime.now()
-        
-        # Add current state as episodic memory with more context
-        state_memory = (
-            f"At {current_time.strftime('%H:%M')} in {self.current_room.value}. "
-            f"Urgent needs: {self.needs_system.get_urgent_needs()}. "
-            f"Last action: {self.action_history[-1] if self.action_history else 'None'}"
-        )
-        
-        self.knowledge_system.add_episodic_memory(
-            state_memory,
-            emotions=self.memory.get_emotional_context()
-        )
-        
-        # Detect and store periodic patterns
-        if len(self.action_history) >= 10:
-            recent_actions = self.action_history[-10:]
-            pattern = self._detect_patterns(recent_actions)
-            if pattern:
-                self.knowledge_system.add_periodic_pattern(
-                    pattern,
-                    "hourly",
-                    metadata={
-                        'time_of_day': current_time.strftime('%H:%M'),
-                        'needs_state': self.needs_system.get_need_status()
+        """Update the character's state and make decisions"""
+        try:
+            logging.debug("Starting character update...")
+            
+            # Update needs based on time passed
+            self.needs_system.update(delta_time)
+            
+            # Regular update for non-activity state
+            logging.debug("Making regular decision...")
+            try:
+                context = self._get_context()
+                logging.debug(f"Context for decision making: {context}")
+                
+                # Add timeout for decision making
+                start_time = time.time()
+                decision = None
+                try:
+                    decision = self.decision_maker.make_decision(context)
+                    logging.debug(f"Decision made in {time.time() - start_time:.2f} seconds")
+                    logging.debug(f"Raw decision from LLM: {decision}")
+                    
+                    # Validate decision structure
+                    if not isinstance(decision, dict) or not all(k in decision for k in ['action', 'target', 'thought']):
+                        raise ValueError(f"Invalid decision structure: {decision}")
+                        
+                except Exception as e:
+                    logging.error(f"Error in decision_maker.make_decision: {e}", exc_info=True)
+                    decision = {
+                        'action': 'idle',
+                        'target': 'none',
+                        'thought': 'Having trouble making a decision...'
                     }
-                )
-        
-        # Update needs using the needs system
-        self.needs_system.update(delta_time)
-        
-        # Get current context
-        context = self._get_context()
-        
-        # Get decision from LLM
-        decision = self.decision_maker.make_decision(context)
-        
-        # Record the decision in memory
-        self.memory.add_memory(
-            f"Decided to {decision['action']} {decision['target']} because {decision['thought']}",
-            importance=0.5
-        )
-        
-        # Execute decision
-        result = self._execute_decision(decision)
-        
-        # Record the result in memory
-        self.memory.add_memory(
-            f"Action result: {result}",
-            importance=0.3
-        )
-        
-        # Store the result as episodic memory
-        self.knowledge_system.add_episodic_memory(
-            f"Action result: {result}",
-            emotions=self.memory.get_emotional_context()
-        )
-        
-        self.thought = decision['thought']
-        return result
+                
+                if not decision:
+                    logging.warning("Decision maker returned None - using fallback decision")
+                    decision = {
+                        'action': 'idle',
+                        'target': 'none',
+                        'thought': 'Thinking about what to do...'
+                    }
+                
+                self.thought = decision.get('thought', 'Thinking...')
+                logging.debug(f"Final decision made: {decision}")
+                
+                # Execute the decision
+                result = self._execute_decision(decision)
+                logging.debug(f"Decision execution result: {result}")
+                return result
+                
+            except Exception as e:
+                logging.error(f"Error in regular decision making: {e}", exc_info=True)
+                return "Error in decision making"
+                
+        except Exception as e:
+            logging.error(f"Error in character update: {e}", exc_info=True)
+            return "Error in character update"
 
     def _get_context(self) -> Dict:
-        urgent_needs = self.needs_system.get_urgent_needs()
-        need_status = self.needs_system.get_need_status()
-        current_room = self.house.get_room(self.position)
-        available_objects = self.house.get_objects_in_room(self.position)
-        
-        return {
-            'current_room': current_room.value,
-            'available_objects': [obj.type.value for obj in available_objects],
-            'needs': self.needs,
-            'need_status': need_status,
-            'urgent_needs': urgent_needs,
-            'recent_actions': self.action_history[-5:],
-            'recent_memories': self.memory.get_recent_memories(5),
-            'important_memories': self.memory.get_important_memories(),
-            'emotional_state': self.memory.get_emotional_context(),
-            'available_directions': self._get_available_directions()
-        }
+        """Get the current context of the character for decision making"""
+        try:
+            # Get basic state information
+            current_room = self.house.get_room(self.position)
+            available_objects = self.house.get_objects_in_room(self.position)
+            
+            # Get needs information
+            needs_info = {
+                'needs': self.needs,
+                'urgent_needs': self.needs_system.get_urgent_needs(),
+                'need_status': self.needs_system.get_need_status()
+            }
+            
+            # Get memory and emotional information
+            memory_info = {
+                'recent_memories': self.memory.get_recent_memories(5),
+                'important_memories': self.memory.get_important_memories(),
+                'emotional_state': self.memory.get_emotional_context()
+            }
+            
+            # Get activity information
+            activity_info = {
+                'is_busy': self.is_busy,
+                'needs_activity_exit': self.needs_activity_exit,
+                'current_activity': None,
+                'activity_duration': 0,
+                'activity_context': self.current_activity_context
+            }
+            
+            if self.is_busy and hasattr(self.activity_manager, 'current_activity'):
+                activity = self.activity_manager.current_activity
+                if activity:
+                    activity_info.update({
+                        'current_activity': activity.type.value,
+                        'activity_duration': time.time() - activity.start_time
+                    })
+            
+            # Build the context dictionary
+            context = {
+                'current_room': current_room.value if current_room else 'unknown',
+                'available_objects': [obj.type.value for obj in available_objects if obj is not None],
+                'available_directions': self._get_available_directions(),
+                'recent_actions': self.action_history[-5:] if self.action_history else [],
+                **needs_info,
+                **memory_info,
+                **activity_info
+            }
+            
+            # Only check for environmental audio if we're not busy
+            if not self.is_busy:
+                try:
+                    environmental_audio = self.listen_to_environment()
+                    if environmental_audio:  # Only add to context if we heard something
+                        context['environmental_audio'] = environmental_audio
+                except Exception as e:
+                    logging.warning(f"Failed to listen to environment: {e}")
+            
+            return context
+            
+        except Exception as e:
+            logging.error(f"Error getting context: {e}", exc_info=True)
+            # Return a minimal context to allow the character to continue functioning
+            return {
+                'current_room': 'unknown',
+                'available_objects': [],
+                'needs': self.needs,
+                'urgent_needs': [],
+                'need_status': {},
+                'recent_actions': [],
+                'recent_memories': [],
+                'important_memories': [],
+                'emotional_state': {},
+                'available_directions': [],
+                'is_busy': False,
+                'needs_activity_exit': False
+            }
 
     def _get_available_directions(self) -> List[str]:
         available = []
@@ -162,6 +239,20 @@ class AutonomousCharacter:
                     result = f"Cannot use {object_type.value} - not found in current room"
             except ValueError:
                 result = f"Invalid object: {target}"
+        
+        elif action == 'speak':
+            speech_file = self.speak(target)
+            if speech_file:
+                result = f"Spoke: {target}"
+                self.memory.add_memory(
+                    f"Said: {target}",
+                    importance=0.5,
+                    emotions={'expressive': 0.6}
+                )
+            else:
+                result = "Failed to speak"
+            return result
+        
         else:
             result = "Idle"
 
@@ -180,86 +271,76 @@ class AutonomousCharacter:
         objects = self.house.get_objects_in_room(self.position)
         target_object = next((obj for obj in objects if obj.type == object_type), None)
         
-        if target_object:
-            if object_type == ObjectType.COMPUTER:
-                if action == "code":
-                    # Generate a coding task based on character's context
-                    context = self._get_context()
-                    coding_prompt = self._generate_coding_prompt(context)
-                    
-                    # Use LLM to generate the code
-                    filename, content = self.coding_system.generate_code(coding_prompt)
-                    
-                    if filename and content:
-                        if self.coding_system.create_file(filename, content):
-                            self.memory.add_memory(
-                                f"Created a new program: {filename}",
-                                importance=0.7,
-                                emotions={"pride": 0.8, "creativity": 0.9}
-                            )
-                            return f"Created new Python file: {filename}"
-                    return "Failed to create Python file"
+        if not target_object:
+            return False
 
-                elif action == "run_code":
-                    files = self.coding_system.list_files()
-                    if not files:
-                        return "No Python files found"
-                    latest_file = max(files)
-                    success, output = self.coding_system.run_file(latest_file)
-                    
-                    # Record the result in memory
-                    if success:
-                        self.memory.add_memory(
-                            f"Successfully ran program {latest_file}",
-                            importance=0.6,
-                            emotions={"satisfaction": 0.7}
-                        )
-                        return f"Ran {latest_file} successfully:\n{output}"
-                    else:
-                        self.memory.add_memory(
-                            f"Failed to run program {latest_file}",
-                            importance=0.5,
-                            emotions={"frustration": 0.6}
-                        )
-                        return f"Failed to run {latest_file}: {output}"
+        # Initialize browser only when using computer or phone
+        if object_type in [ObjectType.COMPUTER, ObjectType.PHONE]:
+            if not self.browser:
+                try:
+                    logging.info("Initializing browser for computer/phone use...")
+                    self.browser = BrowserInterface()
+                    logging.info("Browser initialized successfully")
+                except Exception as e:
+                    logging.error(f"Failed to initialize browser: {str(e)}")
+                    return False
 
-                elif action == "write_journal":
-                    # Generate journal content based on character's context
-                    context = self._get_context()
-                    journal_content = self._generate_journal_content(context)
-                    
-                    if self.journal_system.write_entry(journal_content):
-                        self.memory.add_memory(
-                            "Wrote in my journal about my thoughts and feelings",
-                            importance=0.6,
-                            emotions={"reflective": 0.8, "peaceful": 0.6}
-                        )
-                        return "Wrote a new journal entry"
-                    return "Failed to write journal entry"
-
-                elif action == "read_journal":
-                    entries = self.journal_system.read_entries(5)  # Read last 5 entries
-                    if entries:
-                        self.memory.add_memory(
-                            "Read through my past journal entries",
-                            importance=0.5,
-                            emotions={"nostalgic": 0.7, "reflective": 0.8}
-                        )
-                        return f"Read {len(entries)} journal entries"
-                    return "No journal entries found"
-            elif object_type == ObjectType.PHONE:
-                # Initialize phone system if not exists
-                if not hasattr(self, 'phone_system'):
-                    self.phone_system = PhoneSystem(self)
+        # Handle activity exit actions
+        if action.startswith('exit_'):
+            if self.is_busy and self.needs_activity_exit:
+                activity_type = self.activity_manager.current_activity.type
+                self.activity_manager.exit_activity()
+                self.current_activity_context = None
+                
+                # Close browser if we're exiting computer/phone activity
+                if object_type in [ObjectType.COMPUTER, ObjectType.PHONE] and self.browser:
+                    try:
+                        self.browser.close()
+                        self.browser = None
+                        logging.info("Browser closed after finishing computer/phone activity")
+                    except Exception as e:
+                        logging.error(f"Error closing browser: {str(e)}")
+                
+                self.memory.add_memory(
+                    f"Finished {activity_type.value}",
+                    importance=0.5,
+                    emotions={'satisfied': 0.6}
+                )
                 return True
+            return False
+
+        # Check if object has activity info
+        if target_object.activity_info and action.startswith('use_'):
+            if self.is_busy:
+                return False  # Can't start new activity while busy
+                
+            # Start the activity
+            success = self.activity_manager.start_activity(
+                activity_type=target_object.activity_info.type,
+                duration=target_object.activity_info.duration,
+                need_changes=target_object.activity_info.need_changes,
+                exit_condition=target_object.activity_info.exit_condition
+            )
             
-            # Apply need effects using the needs system
+            if success:
+                self.current_activity_context = {
+                    'object': object_type.value,
+                    'start_time': time.time(),
+                    'initial_needs': self.needs.copy()
+                }
+                self.memory.add_memory(
+                    f"Started using {object_type.value}",
+                    importance=0.6,
+                    emotions={'engaged': 0.7}
+                )
+                return True
+
+        # Handle regular actions
+        if action in target_object.actions:
             for need, effect in target_object.need_effects.items():
                 self.needs_system.modify(need, effect)
-            
-            self.current_action = f"{action} {object_type.value}"
-            self.last_action_time = time.time()
             return True
+            
         return False
 
     def _generate_coding_prompt(self, context: dict) -> str:
@@ -303,24 +384,28 @@ class AutonomousCharacter:
         """Handle incoming phone calls from the user"""
         if not hasattr(self, 'phone_system'):
             self.phone_system = PhoneSystem(self)
-        return self.phone_system.start_call(message)
+        
+        # Use start_call instead of directly calling handle_text_call
+        response = self.phone_system.start_call(message)
+        return response
 
     def _initialize_knowledge(self):
-        # Add basic semantic knowledge about the house and objects
+        # Add basic semantic knowledge about the house and rooms
         for pos, room_type in self.house.rooms.items():
             self.knowledge_system.add_semantic_knowledge(
                 f"The {room_type.value} is located at position ({pos.x}, {pos.y})",
                 metadata={'room_type': room_type.value}
             )
             
-        # Add knowledge about object effects
+        # Add knowledge about object effects - with None check
         for pos, objects in self.house.objects.items():
             for obj in objects:
-                self.knowledge_system.add_semantic_knowledge(
-                    f"The {obj.type.value} can be used for: {', '.join(obj.actions)}. Effects: {obj.need_effects}",
-                    metadata={'object_type': obj.type.value}
-                )
-                
+                if obj is not None:  # Add check for None objects
+                    self.knowledge_system.add_semantic_knowledge(
+                        f"The {obj.type.value} can be used for: {', '.join(obj.actions)}. Effects: {obj.need_effects}",
+                        metadata={'object_type': obj.type.value}
+                    )
+            
         # Add some periodic patterns
         self.knowledge_system.add_periodic_pattern(
             "Energy levels drop significantly after continuous computer use",
@@ -340,3 +425,61 @@ class AutonomousCharacter:
                 return f"Frequently performs action: {action}"
                 
         return None
+
+    def listen_to_environment(self) -> Optional[str]:
+        """Listen to the environment and transcribe any speech"""
+        try:
+            if not self.ears.is_listening:
+                self.ears.start_listening()
+            
+            transcription = self.ears.listen_and_transcribe()
+            
+            if transcription:
+                self.memory.add_memory(
+                    f"Heard in environment: {transcription}",
+                    importance=0.5,
+                    emotions={"attentive": 0.6}
+                )
+                
+                # Add to knowledge system
+                self.knowledge_system.add_episodic_memory(
+                    f"Heard: {transcription}",
+                    emotions={"attentive": 0.6}
+                )
+                
+                return transcription
+            
+            return None
+
+        except Exception as e:
+            logging.warning(f"Error listening to environment: {e}")
+            if self.ears.is_listening:
+                self.ears.stop_listening()
+            return None
+
+    def speak(self, text: str) -> Optional[Path]:
+        """Speak through system speakers"""
+        self.voice_manager.set_output_mode("speakers")
+        audio_file = self.voice_manager.speak(text)
+        
+        if audio_file:
+            self.memory.add_memory(
+                f"Spoke: {text}",
+                importance=0.4,
+                emotions={'expressive': 0.6}
+            )
+        return audio_file
+        
+    def speak_in_voice_chat(self, text: str) -> bool:
+        """Speak through virtual microphone for voice chat"""
+        self.voice_manager.set_output_mode("virtual_mic")
+        audio_file = self.voice_manager.speak(text)
+        
+        if audio_file:
+            self.memory.add_memory(
+                f"Spoke in voice chat: {text}",
+                importance=0.5,
+                emotions={'social': 0.6}
+            )
+            return True
+        return False

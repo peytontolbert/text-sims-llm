@@ -1,9 +1,7 @@
-from typing import Dict, Optional
+from typing import Dict
 import time
 from src.llm.llm_interface import LLMDecisionMaker
-from src.ears.whisper_manager import WhisperManager
 from src.voice.speech import Speech
-import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,104 +11,63 @@ class PhoneSystem:
         self.character = character
         self.in_call = False
         self.llm = LLMDecisionMaker()
-        self.whisper = WhisperManager()
         self.speech = Speech()
         self.call_history = []
         
-    def handle_text_call(self, message: str) -> str:
-        """Handle incoming text messages"""
-        self.in_call = True
-        response = self._process_message(message)
-        self.in_call = False
-        return response
-        
-    def start_call(self) -> dict:
-        """Start a voice call with the character"""
+    def start_call(self, message: str = "") -> dict:
+        """Start or continue a voice call with the character"""
         try:
-            if self.in_call:
-                return {
-                    "success": False,
-                    "message": "Already in a call"
-                }
+            logger.debug(f"Starting call with message: {message}")
+            logger.debug(f"Current call state: in_call={self.in_call}")
+            
+            # Reset call state if something went wrong before
+            if self.in_call and not message:
+                logger.warning("Call marked as active but receiving new start request. Resetting state.")
+                self.in_call = False
+            
+            # Add memory of starting/continuing the call
+            try:
+                logger.debug("Adding memory of call start")
+                if hasattr(self.character, 'memory'):
+                    self.character.memory.add_memory(
+                        "Phone conversation active",
+                        importance=0.6,
+                        emotions={'excitement': 0.7, 'social': 0.8}
+                    )
+            except Exception as e:
+                logger.error(f"Error adding memory: {str(e)}", exc_info=True)
             
             self.in_call = True
+            logger.debug("Call state set to active")
             
-            # Add memory of starting the call
-            self.character.memory.add_memory(
-                "Started a phone conversation",
-                importance=0.6,
-                emotions={'excitement': 0.7, 'social': 0.8}
-            )
-            
-            # Generate greeting response
-            greeting = self._process_message("Hello")
-            
-            # Convert greeting to speech using the correct method
-            audio_path = self.speech.complete_task(greeting)
-            
+            # Just return success for call initialization - no message processing
             return {
                 "success": True,
-                "message": "Call started",
-                "greeting": greeting,
-                "audio_path": str(audio_path)
+                "message": "Call connected. Ready to chat!",
+                "in_call": True,
+                "status": "ready"
             }
-            
+                
         except Exception as e:
-            logger.error(f"Error starting call: {e}")
-            self.in_call = False
+            logger.error(f"Error in call: {str(e)}", exc_info=True)
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "in_call": self.in_call
             }
-        
-    def end_call(self):
-        """End the current voice call"""
+
+    def handle_text_call(self, message: str) -> str:
+        """Handle incoming text messages"""
         try:
-            if self.in_call:
-                self.in_call = False
-                self.whisper.end_call()
-                
-                # Add memory of ending the call
-                self.character.memory.add_memory(
-                    "Ended a phone conversation",
-                    importance=0.4,
-                    emotions={'satisfaction': 0.5}
-                )
-                
-                farewell = self._process_message("Goodbye")
-                self._store_conversation("User ended call", farewell)
-                return {
-                    "success": True,
-                    "message": "Call ended",
-                    "farewell": farewell
-                }
-            return {
-                "success": True,
-                "message": "No active call"
-            }
-        except Exception as e:
-            logger.error(f"Error ending call: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-        
-    def process_voice_input(self):
-        """Process voice input during an active call"""
-        if not self.in_call:
-            return None
+            if not message or not isinstance(message, str):
+                return "Error: Invalid message"
             
-        transcription = self.whisper.get_transcription()
-        if transcription != "No speech detected.":
-            response = self._process_message(transcription)
-            audio_response = self.speech.complete_task(response)
-            return {
-                "transcription": transcription,
-                "text_response": response,
-                "audio_path": str(audio_response)
-            }
-        return None
-        
+            response = self._process_message(message)
+            return response
+        except Exception as e:
+            logger.error(f"Error handling text call: {e}")
+            return "I'm having trouble processing that message right now."
+
     def _process_message(self, message: str) -> str:
         """Process incoming message and generate response"""
         # Create context for the conversation
@@ -171,43 +128,26 @@ class PhoneSystem:
             'response': response,
             'emotional_state': self.character.memory.get_emotional_context()
         })
-        
-    def handle_voice_message(self, audio_data: np.ndarray, sample_rate: int) -> dict:
-        """Handle incoming voice message during call"""
-        if not self.in_call:
-            return {
-                "success": False,
-                "error": "Not in a call. Please start a call first."
-            }
-        
+    
+    def end_call(self) -> dict:
+        """End the voice call"""
         try:
-            # Transcribe incoming audio using whisper
-            transcription = self.whisper.transcribe_audio({
-                "array": audio_data,
-                "sampling_rate": sample_rate
-            })
+            self.in_call = False
             
-            if not transcription or transcription == "No speech detected.":
-                return {
-                    "success": False,
-                    "error": "No speech detected"
-                }
-            
-            # Process the message and get response
-            text_response = self._process_message(transcription)
-            
-            # Convert response to speech using the correct method
-            audio_path = self.speech.complete_task(text_response)
+            # Add memory of ending the call
+            self.character.memory.add_memory(
+                "Ended a phone conversation",
+                importance=0.4,
+                emotions={'satisfaction': 0.6}
+            )
             
             return {
                 "success": True,
-                "transcription": transcription,
-                "text_response": text_response,
-                "audio_path": str(audio_path)
+                "message": "Call ended successfully"
             }
             
         except Exception as e:
-            logger.error(f"Error processing voice message: {e}")
+            logger.error(f"Error ending call: {e}")
             return {
                 "success": False,
                 "error": str(e)

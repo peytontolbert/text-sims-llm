@@ -6,9 +6,13 @@ from selenium.webdriver.common.keys import Keys
 import time
 from PIL import Image, ImageDraw, ImageFont
 import os
+from src.voice.speech import Speech
 
 class BrowserController:
     def __init__(self, window_width=1000, window_height=1000):
+        # Remove voice system from here
+        self.virtual_mic = None
+        
         # Configure Edge WebDriver
         edge_options = Options()
         edge_options.add_argument(f"--window-size={window_width},{window_height}")
@@ -19,7 +23,6 @@ class BrowserController:
         self.driver = webdriver.Edge(options=edge_options)
         
         # Initialize audio state
-        self.virtual_mic = None
         self.audio_initialized = False
         
         # Wait for the browser to open
@@ -103,8 +106,8 @@ class BrowserController:
             result = self.driver.execute_script(setup_script, self.virtual_mic.sample_rate)
             
             if result:
-                print("Successfully initialized virtual microphone (output disabled)")
-                self.audio_initialized = True
+                # Let the character's voice manager know about the virtual mic
+                self.character.voice_manager.set_virtual_mic(virtual_mic)
                 return True
             else:
                 print("Failed to initialize virtual microphone")
@@ -407,5 +410,28 @@ class BrowserController:
             
         except Exception as e:
             print(f"Error checking audio status: {e}")
+            return False
+
+    def speak_through_mic(self, text):
+        """Speak text through the virtual microphone"""
+        if not self.virtual_mic or not self.voice:
+            print("Cannot speak - virtual mic or voice system not initialized")
+            return False
+            
+        try:
+            # Generate speech audio
+            audio_file = self.voice.complete_task(text)
+            
+            if audio_file:
+                # Play audio through virtual mic
+                self.virtual_mic.play_audio(audio_file)
+                print(f"Speaking through virtual mic: {text}")
+                return True
+            else:
+                print("Failed to generate speech audio")
+                return False
+                
+        except Exception as e:
+            print(f"Error speaking through virtual mic: {e}")
             return False
 

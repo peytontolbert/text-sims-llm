@@ -260,6 +260,7 @@
         let isSpeaking = false;
         let isRecording = false;
         let isCallActive = false;
+        let recognition;
 
         const callButton = document.getElementById('callButton');
         const hangupButton = document.getElementById('hangupButton');
@@ -275,51 +276,116 @@
 
         async function startCall() {
             try {
-                await initializeAudioContext();
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        channelCount: 1,
-                        sampleRate: 16000
-                    } 
-                });
+                if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
+                    throw new Error('Speech recognition not supported in this browser');
+                }
                 
-                mediaRecorder = new MediaRecorder(stream);
+                await initializeAudioContext();
+                
+                // Initialize speech recognition
+                recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                // Set up recognition handlers
+                setupRecognitionHandlers();
                 
                 // Start the call on the server
-                const response = await fetch('http://localhost:5000/start-call', { method: 'POST' });
+                const response = await fetch('http://localhost:5000/start-call', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to connect to server');
+                }
+                
                 const result = await response.json();
                 
                 if (result.success) {
                     isCallActive = true;
-                    isRecording = true;
-                    status.textContent = 'In Call';
+                    status.textContent = result.message || 'Call connected. Ready to chat!';
                     callButton.disabled = true;
                     hangupButton.disabled = false;
-                    recordingIndicator.style.display = 'flex';
                     
-                    // Set up the media recorder
-                    mediaRecorder.ondataavailable = handleAudioData;
-                    mediaRecorder.start(1000); // Collect data every second
+                    // Add initial status to transcript
+                    updateTranscript('', 'Call connected. Ready to chat!');
                     
-                    // Play greeting if provided
-                    if (result.greeting) {
-                        speakingIndicator.style.display = 'flex';
-                        updateTranscript('', result.greeting);
-                        if (result.audio_response) {
-                            await playAudioResponse(result.audio_response);
-                        }
-                        speakingIndicator.style.display = 'none';
+                    // Start recognition to listen for user speech
+                    try {
+                        recognition.start();
+                        recordingIndicator.style.display = 'flex';
+                        startPolling();
+                    } catch (error) {
+                        console.error('Error starting recognition:', error);
+                        // Continue with call even if recognition fails
                     }
-                    
-                    startPolling();
                 } else {
                     throw new Error(result.error || 'Failed to start call');
                 }
             } catch (error) {
-                console.error('Error starting call:', error);
-                status.textContent = 'Error: ' + error.message;
-                await endCall();
+                handleCallError(error);
             }
+        }
+
+        function setupRecognitionHandlers() {
+            recognition.onstart = () => {
+                recordingIndicator.style.display = 'flex';
+                isRecording = true;
+            };
+            
+            recognition.onend = () => {
+                recordingIndicator.style.display = 'none';
+                isRecording = false;
+                // Only restart if we're still in a call and not processing
+                if (isCallActive && !isProcessing) {
+                    setTimeout(() => {
+                        if (isCallActive && !isProcessing) {
+                            recognition.start();
+                            recordingIndicator.style.display = 'flex';
+                            isRecording = true;
+                        }
+                    }, 100);
+                }
+            };
+            
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                recordingIndicator.style.display = 'none';
+                isRecording = false;
+                if (isCallActive && !isProcessing && event.error !== 'aborted') {
+                    setTimeout(() => {
+                        if (isCallActive && !isProcessing) {
+                            recognition.start();
+                            recordingIndicator.style.display = 'flex';
+                            isRecording = true;
+                        }
+                    }, 100);
+                }
+            };
+            
+            recognition.onresult = handleAudioData;
+        }
+
+        function handleCallError(error) {
+            console.error('Error starting call:', error);
+            status.textContent = 'Error: ' + error.message;
+            callButton.disabled = false;
+            hangupButton.disabled = true;
+            recordingIndicator.style.display = 'none';
+            speakingIndicator.style.display = 'none';
+            isCallActive = false;
+            if (recognition) {
+                recognition.abort();
+            }
+            // Try to end call on server in case it's stuck
+            fetch('http://localhost:5000/end-call', { method: 'POST' }).catch(e => {
+                console.error('Error ending call after failure:', e);
+            });
         }
 
         async function handleAudioData(event) {
@@ -327,60 +393,71 @@
             
             try {
                 isProcessing = true;
-                audioChunks.push(event.data);
                 
-                if (audioChunks.length >= 2) { // Process every 2 seconds
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    const arrayBuffer = await audioBlob.arrayBuffer();
-                    const audioData = await audioContext.decodeAudioData(arrayBuffer);
-                    const float32Array = audioData.getChannelData(0);
+                // Get the latest result
+                const results = event.results;
+                const lastResult = results[results.length - 1];
+                
+                if (lastResult.isFinal) {
+                    const transcription = lastResult[0].transcript.trim();
                     
-                    // Only process if there's actual audio content
-                    if (hasAudioContent(float32Array)) {
+                    if (transcription) {
+                        // Temporarily stop recording while processing
                         recordingIndicator.style.display = 'none';
+                        recognition.stop();
                         
-                        const formData = new FormData();
-                        const float32Buffer = new Float32Array(float32Array).buffer;
-                        formData.append('audio', new Blob([float32Buffer], { type: 'application/octet-stream' }));
-                        
-                        const response = await fetch('http://localhost:5000/voice-message', {
+                        // Send text message to server
+                        const response = await fetch('http://localhost:5000/text-message', {
                             method: 'POST',
-                            body: formData
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                message: transcription
+                            })
                         });
                         
                         const result = await response.json();
                         if (result.success) {
-                            updateTranscript(result.transcription, result.text_response);
-                            if (result.audio_response) {
-                                isRecording = false;
+                            // Show the conversation in the transcript
+                            updateTranscript(transcription, result.text_response);
+                            
+                            // Play audio response if available
+                            if (result.audio_data && result.audio_data.length > 0) {
                                 speakingIndicator.style.display = 'flex';
-                                await playAudioResponse(result.audio_response);
+                                await playAudioResponse(result.audio_data);
                                 speakingIndicator.style.display = 'none';
-                                isRecording = true;
                             }
                         }
                     }
                     
-                    audioChunks = [];
-                    recordingIndicator.style.display = 'flex';
+                    // Resume recording if still in call
+                    if (isCallActive) {
+                        setTimeout(() => {
+                            if (isCallActive) {
+                                recordingIndicator.style.display = 'flex';
+                                recognition.start();
+                            }
+                        }, 100);
+                    }
                 }
             } catch (error) {
                 console.error('Error processing audio:', error);
+                status.textContent = 'Error processing speech';
             } finally {
                 isProcessing = false;
             }
         }
 
         async function endCall() {
-            if (mediaRecorder && isCallActive) {
+            if (isCallActive) {
                 isCallActive = false;
                 isRecording = false;
                 
-                // Stop recording
-                if (mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
+                // Stop speech recognition
+                if (recognition) {
+                    recognition.stop();
                 }
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 
                 try {
                     const response = await fetch('http://localhost:5000/end-call', { method: 'POST' });
@@ -389,8 +466,8 @@
                     if (result.success && result.farewell) {
                         speakingIndicator.style.display = 'flex';
                         updateTranscript('', result.farewell);
-                        if (result.audio_response) {
-                            await playAudioResponse(result.audio_response);
+                        if (result.audio_data) {
+                            await playAudioResponse(result.audio_data);
                         }
                         speakingIndicator.style.display = 'none';
                     }
@@ -403,7 +480,6 @@
                     hangupButton.disabled = true;
                     recordingIndicator.style.display = 'none';
                     speakingIndicator.style.display = 'none';
-                    audioChunks = [];
                     
                     if (pollInterval) {
                         clearInterval(pollInterval);
@@ -427,20 +503,29 @@
         }
 
         async function playAudioResponse(audioData) {
-            return new Promise(async (resolve, reject) => {
+            return new Promise((resolve, reject) => {
                 try {
-                    const audioBuffer = audioContext.createBuffer(1, audioData.length, 16000);
-                    audioBuffer.getChannelData(0).set(new Float32Array(audioData));
+                    // Convert the array back to Uint8Array
+                    const audioBlob = new Blob([new Uint8Array(audioData)], { type: 'audio/mp3' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
                     
-                    const source = audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(audioContext.destination);
-                    
-                    source.onended = () => {
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
                         resolve();
                     };
                     
-                    source.start(0);
+                    audio.onerror = (error) => {
+                        URL.revokeObjectURL(audioUrl);
+                        reject(error);
+                    };
+                    
+                    // Make sure recognition is stopped while playing
+                    if (recognition) {
+                        recognition.stop();
+                    }
+                    
+                    audio.play();
                 } catch (error) {
                     console.error('Error playing audio:', error);
                     reject(error);
@@ -460,6 +545,8 @@
         });
 
         function updateCharacterLocation(room) {
+            if (!room) return;  // Don't update if no room provided
+            
             // Remove active class from all rooms
             document.querySelectorAll('.room').forEach(el => {
                 el.classList.remove('active');
@@ -468,18 +555,23 @@
                 if (marker) marker.remove();
             });
 
+            // Convert room name to match HTML IDs
+            const roomId = room.toLowerCase().replace(/[_\s]/g, '-');
+            
             // Add active class and character marker to current room
-            const roomElement = document.getElementById(room.toLowerCase().replace('_', '-'));
+            const roomElement = document.getElementById(roomId);
             if (roomElement) {
                 roomElement.classList.add('active');
                 const marker = document.createElement('div');
                 marker.className = 'character-marker';
                 marker.textContent = '👤';
                 roomElement.appendChild(marker);
+                
+                // Update status text with formatted room name
+                document.getElementById('currentRoom').textContent = room.replace(/_/g, ' ');
+            } else {
+                console.warn(`Room element not found for ID: ${roomId}`);
             }
-
-            // Update status text
-            document.getElementById('currentRoom').textContent = room.replace('_', ' ');
         }
 
         function updateCharacterActivity(activity) {
@@ -503,15 +595,33 @@
         // Modify the polling function to be more robust
         async function pollCharacterStatus() {
             try {
-                const response = await fetch('http://localhost:5000/character-status');
+                const response = await fetch('http://localhost:5000/character-status', {
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
+                if (!response.ok && response.status !== 304) {
+                    throw new Error('Failed to get character status');
+                }
+                
+                if (response.status === 304) {
+                    return; // No changes, skip update
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Update room location
-                    updateCharacterLocation(data.room);
+                    // Update room location if room data exists
+                    if (data.room) {
+                        updateCharacterLocation(data.room);
+                    }
                     
-                    // Update current activity
-                    updateCharacterActivity(data.activity || 'Idle');
+                    // Update current activity if it exists
+                    if (data.activity) {
+                        updateCharacterActivity(data.activity || 'Idle');
+                    }
                     
                     // Update thought if provided
                     if (data.thought) {
@@ -525,9 +635,12 @@
                         callButton.disabled = isInCall;
                         hangupButton.disabled = !isInCall;
                     }
+                } else {
+                    console.warn('Character status update failed:', data.error);
                 }
             } catch (error) {
                 console.error('Error polling character status:', error);
+                // Don't update UI on error to prevent crashes
             }
         }
 
@@ -552,6 +665,35 @@
             const rms = Math.sqrt(audioData.reduce((sum, x) => sum + x * x, 0) / audioData.length);
             return rms > threshold;
         }
+
+        // Add this initialization check when the page loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Check if the server is available with no-cache headers
+                const response = await fetch('http://localhost:5000/', {
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
+                // Consider both ok and 304 as successful responses
+                if (!response.ok && response.status !== 304) {
+                    throw new Error('Server not available');
+                }
+                
+                // Initialize the interface
+                status.textContent = 'Ready to call';
+                callButton.disabled = false;
+                hangupButton.disabled = true;
+                
+            } catch (error) {
+                console.error('Error initializing interface:', error);
+                status.textContent = 'Error: Server not available';
+                callButton.disabled = true;
+                hangupButton.disabled = true;
+            }
+        });
     </script>
 </body>
 </html> 

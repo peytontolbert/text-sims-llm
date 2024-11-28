@@ -1,0 +1,121 @@
+{
+  "bed": {
+    "type": "BED",
+    "actions": ["sleep", "rest", "nap"],
+    "need_effects": {
+      "energy": 50,
+      "comfort": 20
+    },
+    "description": "A comfortable bed for sleeping",
+    "price": 1000
+  },
+  "toilet": {
+    "type": "TOILET",
+    "actions": ["use_toilet", "exit_toilet"],
+    "need_effects": {
+      "bladder": 40
+    },
+    "description": "A toilet",
+    "price": 300,
+    "activity_info": {
+      "type": "TOILET_USE",
+      "duration": 300,
+      "need_changes": {
+        "bladder": 0.2
+      }
+    }
+  },
+  "shower": {
+    "type": "SHOWER",
+    "actions": ["use_shower", "exit_shower"],
+    "need_effects": {
+      "hygiene": 40,
+      "comfort": 10
+    },
+    "description": "A shower for getting clean",
+    "price": 500,
+    "activity_info": {
+      "type": "SHOWER_USE",
+      "duration": 900,
+      "need_changes": {
+        "hygiene": 0.1,
+        "comfort": 0.05,
+        "energy": -0.02
+      }
+    }
+  },
+  "tv": {
+    "type": "TV",
+    "actions": ["watch", "channel_surf"],
+    "need_effects": {
+      "fun": 30,
+      "energy": -10,
+      "social": 5
+    },
+    "description": "A TV for entertainment",
+    "price": 800
+  },
+  "computer": {
+    "type": "COMPUTER",
+    "actions": ["use_computer", "exit_computer", "browse", "play", "work", "code"],
+    "need_effects": {
+      "fun": 25,
+      "social": 20,
+      "energy": -15,
+      "coding_skill": 10,
+      "emotional": 15
+    },
+    "description": "A computer for various activities including coding and journaling",
+    "price": 1200,
+    "activity_info": {
+      "type": "COMPUTER_USE",
+      "duration": 3600,
+      "need_changes": {
+        "energy": -0.05,
+        "fun": 0.1,
+        "social": -0.02
+      }
+    }
+  },
+  "couch": {
+    "type": "COUCH",
+    "actions": ["sit", "relax", "nap"],
+    "need_effects": {
+      "energy": 20,
+      "comfort": 30
+    },
+    "description": "A couch for relaxing",
+    "price": 700
+  },
+  "phone": {
+    "type": "PHONE",
+    "actions": ["call", "answer"],
+    "need_effects": {
+      "social": 30,
+      "fun": 10,
+      "energy": -5
+    },
+    "description": "A phone for making calls and socializing",
+    "price": 600
+  },
+  "fridge": {
+    "type": "FRIDGE",
+    "actions": ["get_food", "check_ingredients"],
+    "need_effects": {
+      "hunger": 30
+    },
+    "description": "A fridge full of food",
+    "price": 900
+  },
+  "stove": {
+    "type": "STOVE",
+    "actions": ["cook", "bake", "prepare_meal"],
+    "need_effects": {
+      "hunger": 40,
+      "fun": 10,
+      "energy": -20
+    },
+    "description": "A stove for cooking meals",
+    "price": 800
+  }
+}

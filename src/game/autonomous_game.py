@@ -7,11 +7,45 @@ from src.character.autonomous_character import AutonomousCharacter
 import os
 import json
 from src.phone.voice_chat_server import voice_server
+from src.environment.map import GameMap
+from src.utils.models import Position
 
 class AutonomousSimsGame:
     def __init__(self):
-        self.house = House()
+        self.game_map = GameMap()
+        # Try to find an existing house for our character
+        character_house = None
+        available_houses = self.game_map.get_available_houses()
+        
+        # First check if character already has a house
+        for pos, plot in self.game_map.plots.items():
+            if plot.owner == "AI Character":
+                character_house = pos
+                break
+        
+        # If no house found, try to assign an available one
+        if not character_house and available_houses:
+            character_house = available_houses[0]
+        
+        # If still no house, create a new one
+        if not character_house:
+            character_house = Position(0, 0)  # Default position for new house
+        
+        # Now ensure we have a house at this position
+        if not self.game_map.assign_house_to_character("AI Character", character_house):
+            raise Exception("Failed to create or assign house for character")
+        
+        # Get the house instance
+        self.house = self.game_map.get_building(character_house)
+        if not self.house:
+            raise Exception("Failed to get house instance")
+        
+        # Create character with valid house
         self.character = AutonomousCharacter("AI Character", self.house)
+        # Initialize character position to the assigned house
+        self.game_map.world_state.set_character_position("AI Character", character_house)
+        # Authorize character to use their house's front door
+        self.house.authorize_user("AI Character")
         
         # Initialize voice server with character reference
         voice_server.initialize_phone_system(self.character)
@@ -59,6 +93,9 @@ class AutonomousSimsGame:
     def update(self):
         current_time = time.time()
         delta_time = current_time - self.last_update
+        
+        # Update game world
+        self.game_map.update(delta_time / 3600.0)  # Convert seconds to hours
         
         # Check if it's time to save knowledge
         if current_time - self.last_knowledge_save >= self.knowledge_save_interval:
@@ -113,20 +150,35 @@ class AutonomousSimsGame:
         self.logger.info("Starting Autonomous Sims Simulation...")
         try:
             while self.running:
-                result = self.update()
-                print(f"\nThought: {self.character.thought}")
-                print(f"Action: {result}")
-                print("\nNeeds:")
-                for need, value in self.character.needs.items():
-                    print(f"  {need}: {value:.1f}")
-                print("\nPress Ctrl+C to stop the simulation")
-                time.sleep(2)  # Add delay between actions
+                current_time = time.time()
+                delta_time = current_time - self.last_update
+                
+                # Only update every 2 seconds
+                if delta_time >= 2:
+                    result = self.update()
+                    self.last_update = current_time
+                    
+                    # Print status
+                    print(f"\nThought: {self.character.thought}")
+                    print(f"Action: {result}")
+                    print("\nNeeds:")
+                    for need, value in self.character.needs.items():
+                        print(f"  {need}: {value:.1f}")
+                    
+                    # Save state periodically (every 5 minutes)
+                    if current_time - self.last_knowledge_save >= self.knowledge_save_interval:
+                        self.save_character_state()
+                        self.last_knowledge_save = current_time
+                
+                # Small sleep to prevent CPU overuse
+                time.sleep(0.1)
+                
         except KeyboardInterrupt:
             self.logger.info("\nSimulation stopped by user")
-            self.save_character_state()  # Save state when stopping
+            self.save_character_state()
         except Exception as e:
             self.logger.error(f"Simulation crashed with error: {str(e)}", exc_info=True)
-            self.save_character_state()  # Save state on crash too
+            self.save_character_state()
         finally:
-            if self.character.browser:
+            if hasattr(self.character, 'browser') and self.character.browser:
                 self.character.browser.close()

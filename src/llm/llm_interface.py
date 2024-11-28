@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 import time
 from src.memory.knowledge_system import KnowledgeSystem
+import logging
 
 load_dotenv()
 
@@ -20,7 +21,14 @@ class LLMDecisionMaker:
     def make_decision(self, context: Dict) -> Dict:
         knowledge_context = self._get_relevant_knowledge(context)
         enhanced_prompt = self._create_enhanced_prompt(context, knowledge_context)
+        
+        # Add logging for debugging
+        logging.debug("Making LLM decision with prompt:")
+        logging.debug(enhanced_prompt)
+        
         try:
+            # Add timeout handling
+            start_time = time.time()
             response = self.client.chat.completions.create(
                 model="gpt-4-0613",
                 messages=[
@@ -28,41 +36,59 @@ class LLMDecisionMaker:
                     {"role": "user", "content": enhanced_prompt}
                 ],
                 temperature=0.7,
-                max_tokens=150
+                max_tokens=150,
+                timeout=30  # Add timeout
             )
+            logging.debug(f"LLM response received in {time.time() - start_time:.2f} seconds")
+            logging.debug(f"Raw LLM response: {response.choices[0].message.content}")
             
-            decision = json.loads(response.choices[0].message.content)
-            
-            # Store the decision as episodic memory
-            self.knowledge_system.add_episodic_memory(
-                f"Decided to {decision['action']} {decision['target']} because {decision['thought']}",
-                emotions=context.get('emotional_state', {})
-            )
-            
-            # Log the full context and response
-            log_entry = {
-                'timestamp': datetime.now().isoformat(),
-                'context': context,
-                'prompt': enhanced_prompt,
-                'response': response.choices[0].message.content,
-                'decision': decision
+            try:
+                decision = json.loads(response.choices[0].message.content)
+                
+                # Validate decision format
+                required_keys = ['action', 'target', 'thought']
+                if not all(key in decision for key in required_keys):
+                    logging.error(f"Invalid decision format. Missing keys. Decision: {decision}")
+                    raise ValueError("Invalid decision format")
+                    
+                # Store the decision as episodic memory
+                self.knowledge_system.add_episodic_memory(
+                    f"Decided to {decision['action']} {decision['target']} because {decision['thought']}",
+                    emotions=context.get('emotional_state', {})
+                )
+                
+                return decision
+                
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse LLM response as JSON: {e}")
+                logging.error(f"Raw response: {response.choices[0].message.content}")
+                return {
+                    "action": "idle",
+                    "target": "none",
+                    "thought": "Having trouble understanding my own thoughts..."
+                }
+                
+        except openai.error.Timeout as e:
+            logging.error(f"OpenAI API timeout: {e}")
+            return {
+                "action": "idle",
+                "target": "none",
+                "thought": "Taking a moment to think..."
             }
-            
-            # Create llm_logs directory if it doesn't exist
-            os.makedirs('logs/llm_logs', exist_ok=True)
-            
-            # Save detailed log to separate JSON file
-            with open(f'logs/llm_logs/llm_decision_{int(time.time())}.json', 'w') as f:
-                json.dump(log_entry, f, indent=4)
-            
-            self.conversation_history.append({
-                "context": context,
-                "decision": decision
-            })
-            return decision
+        except openai.error.APIError as e:
+            logging.error(f"OpenAI API error: {e}")
+            return {
+                "action": "idle",
+                "target": "none",
+                "thought": "Having trouble thinking clearly..."
+            }
         except Exception as e:
-            print(f"Error in LLM decision making: {e}")
-            return {"action": "idle", "target": None, "thought": "I'm not sure what to do..."}
+            logging.error(f"Unexpected error in LLM decision making: {e}", exc_info=True)
+            return {
+                "action": "idle",
+                "target": "none",
+                "thought": "I'm not sure what to do..."
+            }
 
     def _get_relevant_knowledge(self, context: Dict) -> Dict:
         """Query knowledge system for relevant information"""
@@ -229,3 +255,61 @@ Respond naturally to this message, considering your current emotional state and 
         except Exception as e:
             self.logger.error(f"Error in journal generation: {str(e)}")
             return {"content": "Failed to generate journal entry", "tags": []}
+
+    def generate_voice_response(self, context: Dict) -> str:
+        """Generate an appropriate voice response based on the character's context"""
+        prompt = {
+            "task": "generate_voice_response",
+            "context": {
+                "recent_memories": context.get('recent_memories', []),
+                "emotional_state": context.get('emotional_state', {}),
+                "current_room": context.get('current_room', "unknown"),
+                "needs": context.get('needs', {})
+            }
+        }
+        
+        # Use your existing LLM interface to generate a response
+        response = self._get_llm_response(prompt)
+        return response.get('response', "I'm not sure what to say.")
+
+    def make_activity_decision(self, context: Dict) -> Dict:
+        """Generate decisions for ongoing activities"""
+        if context.get('activity_completed'):
+            prompt = self._create_activity_exit_prompt(context)
+        else:
+            prompt = self._create_activity_update_prompt(context)
+            
+        response = self.llm.generate_response(prompt)
+        return {
+            'action': response['action'],
+            'target': response['target'],
+            'thought': response['thought']
+        }
+        
+    def _create_activity_exit_prompt(self, context: Dict) -> str:
+        return f"""
+        You are currently finishing {context['current_activity']}.
+        Duration: {context['activity_duration']} seconds
+        Need changes: {context['need_changes']}
+        
+        Should you exit the activity now? Consider:
+        1. Have your needs been satisfied?
+        2. Is there any reason to continue?
+        3. Are there more urgent needs to address?
+        
+        Decide whether to exit and explain why.
+        """
+        
+    def _create_activity_update_prompt(self, context: Dict) -> str:
+        return f"""
+        You are currently engaged in {context['current_activity']}.
+        Duration: {context['activity_duration']} seconds
+        Current needs: {context['needs']}
+        
+        Consider:
+        1. Is the activity still beneficial?
+        2. Are any needs becoming urgent?
+        3. Should you continue or prepare to exit?
+        
+        Provide your thoughts on the current activity.
+        """

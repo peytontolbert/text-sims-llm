@@ -1,0 +1,55 @@
+{
+  "groceries": {
+    "apple": {
+      "type": "FOOD",
+      "actions": ["eat"],
+      "need_effects": {
+        "hunger": 10,
+        "health": 5
+      },
+      "description": "A fresh apple",
+      "price": 1
+    },
+    "bread": {
+      "type": "FOOD",
+      "actions": ["eat"],
+      "need_effects": {
+        "hunger": 15
+      },
+      "description": "A loaf of bread",
+      "price": 3
+    },
+    "milk": {
+      "type": "DRINK",
+      "actions": ["drink"],
+      "need_effects": {
+        "hunger": 5,
+        "health": 3
+      },
+      "description": "A carton of milk",
+      "price": 4
+    }
+  },
+  "electronics": {
+    "smartphone": {
+      "type": "PHONE",
+      "actions": ["call", "text", "browse"],
+      "need_effects": {
+        "social": 20,
+        "fun": 15
+      },
+      "description": "A modern smartphone",
+      "price": 600
+    },
+    "laptop": {
+      "type": "COMPUTER",
+      "actions": ["browse", "work", "code"],
+      "need_effects": {
+        "fun": 20,
+        "productivity": 30
+      },
+      "description": "A portable computer",
+      "price": 1000
+    }
+  }
+}

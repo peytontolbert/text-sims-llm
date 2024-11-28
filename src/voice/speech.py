@@ -27,6 +27,8 @@ class Speech:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             speech_file = self.speech_dir / f"speech_{timestamp}.mp3"
             
+            self.logger.info(f"Generating speech for text: {input_text[:50]}...")
+            
             # Generate speech
             response = self.client.audio.speech.create(
                 model="tts-1",
@@ -37,6 +39,12 @@ class Speech:
             # Save the file
             response.stream_to_file(str(speech_file))
             
+            self.logger.info(f"Speech file saved to: {speech_file}")
+            
+            # Verify file exists and has content
+            if not speech_file.exists():
+                raise Exception("Speech file was not created")
+                
             return speech_file
             
         except Exception as e:

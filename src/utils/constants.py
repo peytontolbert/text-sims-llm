@@ -24,3 +24,25 @@ class ObjectType(Enum):
     SHOWER = 'shower'
     COUCH = 'couch'
     PHONE = 'phone'
+    DOOR = 'door'
+    FOOD = 'food'
+    DRINK = 'drink'
+
+class BuildingType(Enum):
+    HOUSE = "house"
+    SUPERMARKET = "supermarket"
+    EMPTY = "empty"
+
+class ActivityState(Enum):
+    IDLE = 'idle'
+    BUSY = 'busy'
+    NEEDS_EXIT = 'needs_exit'
+
+class ActivityType(Enum):
+    TOILET_USE = 'toilet_use'
+    FRIDGE_USE = 'fridge_use'
+    COMPUTER_USE = 'computer_use'
+    TV_WATCHING = 'tv_watching'
+    SLEEPING = 'sleeping'
+    EATING = 'eating'
+    SHOWER_USE = 'shower_use'

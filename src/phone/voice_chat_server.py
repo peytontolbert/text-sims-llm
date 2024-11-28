@@ -1,29 +1,25 @@
-from flask import Flask, request, jsonify, Response, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
-import numpy as np
-import json
 import logging
-from typing import Optional
-from src.ears.whisper_manager import WhisperManager
-from src.voice.speech import Speech
+from pathlib import Path
 from src.phone.phone_system import PhoneSystem
-import sounddevice as sd
-import soundfile as sf
-import io
-import wave
-import time
-import os
 
 app = Flask(__name__, static_folder='.')
 CORS(app)
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('phone_system.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class VoiceChatServer:
     def __init__(self):
-        self.whisper = WhisperManager()
-        self.speech = Speech()
         self.phone_system = None
         self.character = None
         
@@ -33,50 +29,158 @@ class VoiceChatServer:
         self.phone_system = PhoneSystem(character)
         return {"success": True, "message": "Phone system initialized"}
 
-    def process_voice_message(self, audio_data: np.ndarray, sample_rate: int) -> dict:
-        """Process incoming voice message and return character's response"""
-        try:
-            # Transcribe incoming audio
-            transcription = self.whisper.transcribe_audio({
-                "array": audio_data,
-                "sampling_rate": sample_rate
+voice_server = VoiceChatServer()
+
+@app.route('/')
+def serve_index():
+    """Serve the main phone interface"""
+    return send_from_directory('.', 'index.html')
+
+@app.route('/text-message', methods=['POST'])
+def receive_text_message():
+    try:
+        if not voice_server.phone_system:
+            return jsonify({
+                "success": False,
+                "error": "Phone system not initialized"
             })
             
-            logger.info(f"Transcribed message: {transcription}")
+        data = request.json
+        message = data.get('message')
+        
+        if not message:
+            return jsonify({
+                "success": False,
+                "error": "No message provided"
+            })
+        
+        # Get character's response
+        response = voice_server.phone_system.handle_text_call(message)
+        
+        # Try to convert response to speech
+        try:
+            audio_path = voice_server.phone_system.speech.complete_task(response)
             
-            if transcription and transcription != "Transcription failed.":
-                # Get character's text response through phone system
-                text_response = self.phone_system._process_message(transcription)
+            # Read the audio file
+            with open(str(audio_path), 'rb') as audio_file:
+                audio_data = audio_file.read()
                 
-                # Convert response to speech
-                audio_path = self.speech.complete_task(text_response)
-                
-                # Read the audio file and convert to array
-                audio_data, sr = sf.read(str(audio_path))
-                
-                return {
-                    "success": True,
-                    "transcription": transcription,
-                    "text_response": text_response,
-                    "audio_response": audio_data.tolist()
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "No speech detected or transcription failed"
-                }
+            return jsonify({
+                "success": True,
+                "text_response": response,
+                "audio_data": list(audio_data)  # Convert bytes to list for JSON
+            })
             
         except Exception as e:
-            logger.error(f"Error processing voice message: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.error(f"Speech generation failed: {e}")
+            # Return just the text response if speech fails
+            return jsonify({
+                "success": True,
+                "text_response": response,
+                "audio_data": None
+            })
+            
+    except Exception as e:
+        logger.error(f"Error handling text message: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
-voice_server = VoiceChatServer()
+@app.after_request
+def add_header(response):
+    """Add headers to prevent caching for API endpoints"""
+    if request.endpoint != 'serve_index':  # Don't add for static files
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+@app.route('/start-call', methods=['POST'])
+def start_call():
+    try:
+        logger.debug("Received start-call request")
+        logger.debug(f"Request data: {request.get_data()}")
+        logger.debug(f"Request JSON: {request.get_json(silent=True)}")
+        
+        if not voice_server.phone_system:
+            logger.error("Phone system not initialized")
+            return make_response(jsonify({
+                "success": False,
+                "error": "Phone system not initialized"
+            }), 503)  # Service Unavailable
+            
+        # Initialize phone system if not already done
+        if not voice_server.character:
+            logger.warning("Character not initialized, attempting to initialize...")
+            try:
+                # Create a basic character initialization
+                from src.character.autonomous_character import AutonomousCharacter
+                from src.environment.house import House
+                
+                house = House()
+                character = AutonomousCharacter("AI Assistant", house)
+                voice_server.initialize_phone_system(character)
+                logger.info("Successfully initialized character and phone system")
+            except Exception as e:
+                logger.error(f"Failed to initialize character: {e}")
+                return make_response(jsonify({
+                    "success": False,
+                    "error": "Failed to initialize character system"
+                }), 500)
+            
+        logger.debug(f"Phone system state - in_call: {voice_server.phone_system.in_call}")
+        
+        # Get message from request body (if any)
+        data = request.get_json(silent=True) or {}
+        initial_message = data.get('message', '')
+        logger.debug(f"Initial message: {initial_message}")
+            
+        # Start call with optional initial message
+        logger.debug("Attempting to start call...")
+        result = voice_server.phone_system.start_call(initial_message)
+        logger.debug(f"Start call result: {result}")
+        
+        if result.get("success", False):
+            logger.info("Call started successfully")
+            return make_response(jsonify(result), 200)
+        else:
+            logger.warning(f"Call start failed: {result.get('error', 'Unknown error')}")
+            return make_response(jsonify(result), 400)  # Bad Request
+            
+    except Exception as e:
+        logger.error(f"Error starting call: {str(e)}", exc_info=True)
+        return make_response(jsonify({
+            "success": False,
+            "error": str(e),
+            "in_call": voice_server.phone_system.in_call if voice_server.phone_system else False
+        }), 500)
+
+@app.route('/end-call', methods=['POST'])
+def end_call():
+    try:
+        if not voice_server.phone_system:
+            return jsonify({
+                "success": False,
+                "error": "Phone system not initialized"
+            })
+            
+        result = voice_server.phone_system.end_call()
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error ending call: {e}")
+        # Make sure to reset call status even if there's an error
+        if voice_server.phone_system:
+            voice_server.phone_system.in_call = False
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
 @app.route('/initialize', methods=['POST'])
 def initialize():
+    """Initialize the phone system with a character"""
     try:
         data = request.json
         character = data.get('character')
@@ -86,90 +190,30 @@ def initialize():
         logger.error(f"Error initializing phone system: {e}")
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/voice-message', methods=['POST'])
-def receive_voice_message():
+@app.route('/character-status')
+def get_character_status():
+    """Get the current status of the character"""
     try:
-        # Get audio data from request
-        if 'audio' not in request.files:
-            return jsonify({"success": False, "error": "No audio file received"})
+        if not voice_server.character:
+            return jsonify({
+                "success": False,
+                "error": "Character not initialized"
+            })
             
-        audio_file = request.files['audio']
-        
-        # Read the raw audio data as bytes
-        audio_bytes = audio_file.read()
-        
-        # Convert the audio bytes to numpy array
-        audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        
-        # Use a default sample rate of 16000 (what Whisper expects)
-        sample_rate = 16000
-        
-        # Process the voice message
-        response = voice_server.process_voice_message(audio_data, sample_rate)
-        
-        # Ensure the call stays active
-        if response.get('success'):
-            voice_server.phone_system.in_call = True
-            
-        return jsonify(response)
-        
-    except Exception as e:
-        logger.error(f"Error handling voice message: {e}")
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/text-message', methods=['POST'])
-def receive_text_message():
-    try:
-        data = request.json
-        message = data.get('message')
-        
-        # Get character's response
-        response = voice_server.phone_system.handle_text_call(message)
-        
-        # Convert response to speech
-        audio_path = voice_server.speech.complete_task(response)
-        
-        # Read the audio file
-        with open(str(audio_path), 'rb') as audio_file:
-            audio_data = audio_file.read()
-        
         return jsonify({
             "success": True,
-            "text_response": response,
-            "audio_data": audio_data
+            "room": voice_server.character.current_room.value,
+            "activity": voice_server.character.current_action,
+            "thought": voice_server.character.thought,
+            "in_call": voice_server.phone_system.in_call if voice_server.phone_system else False
         })
         
     except Exception as e:
-        logger.error(f"Error handling text message: {e}")
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/start-call', methods=['POST'])
-def start_call():
-    try:
-        if not voice_server.phone_system:
-            return jsonify({
-                "success": False, 
-                "error": "Phone system not initialized. Please initialize first."
-            })
-            
-        response = voice_server.phone_system.start_call()
-        return jsonify(response)
-    except Exception as e:
-        logger.error(f"Error starting call: {e}")
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/end-call', methods=['POST'])
-def end_call():
-    try:
-        response = voice_server.phone_system.end_call()
-        return jsonify({"success": True, "message": response})
-    except Exception as e:
-        logger.error(f"Error ending call: {e}")
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/')
-def serve_index():
-    return send_from_directory('.', 'index.html')
+        logger.error(f"Error getting character status: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
 def run_server(host='0.0.0.0', port=5000):
     print(f"Server running at http://{host}:{port}")
