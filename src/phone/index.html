@@ -196,12 +196,38 @@
             50% { transform: scale(1.1); }
             100% { transform: scale(1); }
         }
+        .character-select {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .character-select select {
+            width: 100%;
+            padding: 8px;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        .character-select select option:disabled {
+            color: #999;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
     <div class="call-container">
         <h1>Call Character</h1>
         <div class="status" id="status">Ready to call</div>
+        <div class="character-select">
+            <h3>Select Character</h3>
+            <select id="characterSelect" onchange="handleCharacterSelect()">
+                <option value="">Select a character...</option>
+            </select>
+        </div>
         <div class="status-indicators">
             <div class="indicator recording-indicator" id="recordingIndicator">
                 <div class="dot"></div>
@@ -276,6 +302,12 @@
 
         async function startCall() {
             try {
+                const selectedCharacter = document.getElementById('characterSelect').value;
+                if (!selectedCharacter) {
+                    status.textContent = 'Please select a character to call';
+                    return;
+                }
+                
                 if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
                     throw new Error('Speech recognition not supported in this browser');
                 }
@@ -297,38 +329,43 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({
+                        character: selectedCharacter
+                    })
                 });
                 
                 if (!response.ok) {
-                    throw new Error('Failed to connect to server');
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const result = await response.json();
                 
-                if (result.success) {
-                    isCallActive = true;
-                    status.textContent = result.message || 'Call connected. Ready to chat!';
-                    callButton.disabled = true;
-                    hangupButton.disabled = false;
-                    
-                    // Add initial status to transcript
-                    updateTranscript('', 'Call connected. Ready to chat!');
-                    
-                    // Start recognition to listen for user speech
-                    try {
-                        recognition.start();
-                        recordingIndicator.style.display = 'flex';
-                        startPolling();
-                    } catch (error) {
-                        console.error('Error starting recognition:', error);
-                        // Continue with call even if recognition fails
-                    }
-                } else {
+                if (!result.success) {
                     throw new Error(result.error || 'Failed to start call');
                 }
+                
+                isCallActive = true;
+                status.textContent = result.message || 'Call connected. Ready to chat!';
+                callButton.disabled = true;
+                hangupButton.disabled = false;
+                
+                // Add initial status to transcript
+                updateTranscript('', 'Call connected. Ready to chat!');
+                
+                // Start recognition to listen for user speech
+                try {
+                    recognition.start();
+                    recordingIndicator.style.display = 'flex';
+                    startPolling();
+                } catch (error) {
+                    console.error('Error starting recognition:', error);
+                    // Continue with call even if recognition fails
+                }
             } catch (error) {
-                handleCallError(error);
+                console.error('Error starting call:', error);
+                status.textContent = 'Error: ' + error.message;
+                callButton.disabled = false;
+                hangupButton.disabled = true;
             }
         }
 
@@ -593,9 +630,12 @@
         }
 
         // Modify the polling function to be more robust
-        async function pollCharacterStatus() {
+        async function pollCharacterStatus(characterName = null) {
             try {
-                const response = await fetch('http://localhost:5000/character-status', {
+                const selectedCharacter = characterName || document.getElementById('characterSelect').value;
+                if (!selectedCharacter) return;
+
+                const response = await fetch(`http://localhost:5000/character-status?character=${selectedCharacter}`, {
                     headers: {
                         'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache'
@@ -613,22 +653,18 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Update room location if room data exists
                     if (data.room) {
                         updateCharacterLocation(data.room);
                     }
                     
-                    // Update current activity if it exists
                     if (data.activity) {
                         updateCharacterActivity(data.activity || 'Idle');
                     }
                     
-                    // Update thought if provided
                     if (data.thought) {
                         addThought(data.thought);
                     }
                     
-                    // Update call status if needed
                     if (data.in_call !== undefined) {
                         isInCall = data.in_call;
                         status.textContent = isInCall ? 'In Call' : 'Ready to call';
@@ -640,7 +676,6 @@
                 }
             } catch (error) {
                 console.error('Error polling character status:', error);
-                // Don't update UI on error to prevent crashes
             }
         }
 
@@ -648,14 +683,14 @@
         let pollInterval;
 
         // Add function to start polling
-        function startPolling() {
+        function startPolling(characterName = null) {
             if (pollInterval) {
                 clearInterval(pollInterval);
             }
-            pollCharacterStatus();
+            pollCharacterStatus(characterName);
             pollInterval = setInterval(() => {
-                if (isCallActive) {
-                    pollCharacterStatus();
+                if (isCallActive || characterName) {
+                    pollCharacterStatus(characterName);
                 }
             }, 3000);
         }
@@ -669,31 +704,169 @@
         // Add this initialization check when the page loads
         document.addEventListener('DOMContentLoaded', async () => {
             try {
-                // Check if the server is available with no-cache headers
-                const response = await fetch('http://localhost:5000/', {
+                await loadAvailableCharacters();
+                // Start periodic refresh of character list
+                setInterval(loadAvailableCharacters, 10000);
+            } catch (error) {
+                console.error('Error initializing:', error);
+                status.textContent = 'Error initializing: ' + error.message;
+            }
+        });
+
+        async function loadAvailableCharacters() {
+            try {
+                const response = await fetch('http://localhost:5000/available-characters');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                if (data.success) {
+                    const select = document.getElementById('characterSelect');
+                    const currentValue = select.value; // Store current selection
+                    select.innerHTML = '<option value="">Select a character...</option>';
+                    
+                    if (data.characters && data.characters.length > 0) {
+                        // Store characters for reference
+                        window.availableCharacters = data.characters;
+                        
+                        data.characters.forEach(char => {
+                            const option = document.createElement('option');
+                            option.value = char.name;
+                            
+                            // Check if character is online (updated in last 30 seconds)
+                            const isOnline = char.online && 
+                                char.last_update && 
+                                (Date.now() / 1000 - char.last_update) < 30;
+                            
+                            option.textContent = `${char.name} (${isOnline ? 'Online' : 'Offline'})`;
+                            option.disabled = !isOnline;
+                            select.appendChild(option);
+                        });
+                        
+                        // Restore previous selection if still available
+                        if (currentValue) {
+                            select.value = currentValue;
+                        }
+                        
+                        status.textContent = 'Select a character';
+                        callButton.disabled = !select.value || select.selectedOptions[0].disabled;
+                    } else {
+                        status.textContent = 'No characters available';
+                        callButton.disabled = true;
+                    }
+                } else {
+                    console.error('Failed to load characters:', data.error);
+                    status.textContent = 'Error loading characters: ' + (data.error || 'Unknown error');
+                    callButton.disabled = true;
+                }
+            } catch (error) {
+                console.error('Error loading characters:', error);
+                status.textContent = 'Error loading characters: ' + error.message;
+                callButton.disabled = true;
+            }
+        }
+
+        // Add function to handle character view changes
+        async function handleCharacterSelect() {
+            const select = document.getElementById('characterSelect');
+            const selectedCharacter = select.value;
+            
+            if (selectedCharacter) {
+                // Reset UI elements
+                document.getElementById('transcriptText').innerHTML = '';
+                document.getElementById('thoughtsList').innerHTML = '';
+                document.getElementById('currentRoom').textContent = '-';
+                document.getElementById('currentActivity').textContent = '-';
+                
+                // Find the character in our stored list
+                const character = window.availableCharacters.find(c => c.name === selectedCharacter);
+                
+                if (!character) {
+                    status.textContent = 'Character not found';
+                    callButton.disabled = true;
+                    return;
+                }
+
+                // Check if character is active
+                const isActive = character.online && 
+                    character.last_update && 
+                    (Date.now() - new Date(character.last_update).getTime()) < 10000;
+
+                // Update call button and status based on character activity
+                callButton.disabled = !isActive;
+                status.textContent = isActive ? 
+                    'Ready to call' : 
+                    'Character is currently offline';
+                
+                // Start polling for character status
+                await pollCharacterStatus(selectedCharacter);
+                startPolling(selectedCharacter);
+            }
+        }
+
+        // Add this function to check character online status
+        function isCharacterActive(character) {
+            return character.online && 
+                character.last_update && 
+                (Date.now() - new Date(character.last_update).getTime()) < 10000;
+        }
+
+        // Update the polling function to handle online status
+        async function pollCharacterStatus(characterName = null) {
+            try {
+                const selectedCharacter = characterName || document.getElementById('characterSelect').value;
+                if (!selectedCharacter) return;
+
+                const response = await fetch(`http://localhost:5000/character-status?character=${selectedCharacter}`, {
                     headers: {
                         'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache'
                     }
                 });
                 
-                // Consider both ok and 304 as successful responses
                 if (!response.ok && response.status !== 304) {
-                    throw new Error('Server not available');
+                    throw new Error('Failed to get character status');
                 }
                 
-                // Initialize the interface
-                status.textContent = 'Ready to call';
-                callButton.disabled = false;
-                hangupButton.disabled = true;
+                const data = await response.json();
                 
+                if (data.success) {
+                    // Update online status in the select dropdown
+                    const select = document.getElementById('characterSelect');
+                    const option = Array.from(select.options).find(opt => opt.value === selectedCharacter);
+                    
+                    if (option) {
+                        const isActive = data.online && 
+                            data.last_update && 
+                            (Date.now() - new Date(data.last_update).getTime()) < 10000;
+                        
+                        option.textContent = `${selectedCharacter} (${isActive ? 'Online' : 'Offline'})`;
+                        option.disabled = !isActive;
+                        
+                        // Update call button state
+                        if (!isInCall) {
+                            callButton.disabled = !isActive;
+                            status.textContent = isActive ? 'Ready to call' : 'Character is offline';
+                        }
+                    }
+                    
+                    if (data.room) {
+                        updateCharacterLocation(data.room);
+                    }
+                    
+                    if (data.activity) {
+                        updateCharacterActivity(data.activity || 'Idle');
+                    }
+                    
+                    if (data.thought) {
+                        addThought(data.thought);
+                    }
+                }
             } catch (error) {
-                console.error('Error initializing interface:', error);
-                status.textContent = 'Error: Server not available';
-                callButton.disabled = true;
-                hangupButton.disabled = true;
+                console.error('Error polling character status:', error);
             }
-        });
+        }
     </script>
 </body>
 </html> 

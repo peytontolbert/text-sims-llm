@@ -4,6 +4,7 @@ from src.utils.models import Position, GameObject
 from src.utils.constants import RoomType, ObjectType
 from collections import defaultdict
 from src.environment.objects import ObjectManager
+from src.utils.position import Position
 
 class Door:
     def __init__(self):
@@ -32,63 +33,79 @@ class Door:
         self.authorized_users.discard(user)
 
 class House:
-    def __init__(self):
-        self.rooms: Dict[Position, RoomType] = {}
-        self.objects: Dict[Position, List[GameObject]] = defaultdict(list)
-        self.front_door = Door()
-        self.object_manager = ObjectManager()
-        self.initialize_layout()
-
-    def initialize_layout(self):
-        """Initialize default house layout if none is provided"""
-        # Always ensure we have at least these basic rooms
+    def __init__(self, position: Position):
+        self.position = position
+        self.owner = None  # Add owner attribute
+        # Initialize default rooms
         self.rooms = {
-            Position(0, -1): RoomType.HALLWAY,
-            Position(0, 0): RoomType.BEDROOM,
-            Position(1, 0): RoomType.BATHROOM,
-            Position(0, 1): RoomType.LIVING_ROOM,
-            Position(1, 1): RoomType.KITCHEN
+            "hallway": {
+                "type": "HALLWAY",
+                "position": {"x": 0, "y": -1},
+                "objects": ["door", "doorbell"]
+            },
+            "bedroom": {
+                "type": "BEDROOM",
+                "position": {"x": 0, "y": 0},
+                "objects": ["bed"]
+            },
+            "bathroom": {
+                "type": "BATHROOM",
+                "position": {"x": 1, "y": 0},
+                "objects": ["toilet", "shower"]
+            },
+            "living_room": {
+                "type": "LIVING_ROOM",
+                "position": {"x": 0, "y": 1},
+                "objects": ["tv", "computer", "couch", "phone"]
+            },
+            "kitchen": {
+                "type": "KITCHEN",
+                "position": {"x": 1, "y": 1},
+                "objects": ["fridge", "stove"]
+            }
         }
-        
-        # Initialize basic objects with defaultdict
-        self.objects.clear()  # Clear any existing objects
-        
-        # Add objects to rooms - explicitly create lists for each position
-        bedroom_pos = Position(0, 0)
-        self.objects[bedroom_pos] = [self.object_manager.get_house_item('bed')]
-        
-        hallway_pos = Position(0, -1)
-        self.objects[hallway_pos] = [self.object_manager.get_house_item('door')]
-        
-        bathroom_pos = Position(1, 0)
-        self.objects[bathroom_pos] = [
-            self.object_manager.get_house_item('toilet'),
-            self.object_manager.get_house_item('shower')
-        ]
-        
-        living_room_pos = Position(0, 1)
-        self.objects[living_room_pos] = [
-            self.object_manager.get_house_item('tv'),
-            self.object_manager.get_house_item('computer'),
-            self.object_manager.get_house_item('couch'),
-            self.object_manager.get_house_item('phone')
-        ]
-        
-        kitchen_pos = Position(1, 1)
-        self.objects[kitchen_pos] = [
-            self.object_manager.get_house_item('fridge'),
-            self.object_manager.get_house_item('stove')
-        ]
+        self.authorized_users = set()
+        self.front_door = Door()
+        self.doorbell_queue = []  # Store visitors waiting at door
 
-    def get_room(self, position: Position) -> Optional[RoomType]:
-        return self.rooms.get(position)
+    def get_room(self, position: Position) -> RoomType:
+        """Get the room type at the given position"""
+        # Convert position to room coordinates relative to house
+        rel_x = position.x - self.position.x
+        rel_y = position.y - self.position.y
+        
+        # Look up room by relative position
+        for room in self.rooms.values():
+            room_pos = room["position"]
+            if room_pos["x"] == rel_x and room_pos["y"] == rel_y:
+                return RoomType[room["type"]]
+        
+        # Default to LIVING_ROOM if room not found
+        return RoomType.LIVING_ROOM
 
-    def get_objects_in_room(self, position: Position) -> List[GameObject]:
-        """Get all objects in a room at the given position"""
-        # Debug print to check position and objects
-        objects = self.objects.get(position, [])
-        print(f"Getting objects at position {position}, found: {[obj.type.value for obj in objects]}")
-        return objects
+    def authorize_user(self, user_name: str):
+        """Authorize a user to access the house"""
+        self.authorized_users.add(user_name)
+
+    def is_authorized(self, user_name: str) -> bool:
+        """Check if a user is authorized to access the house"""
+        return user_name in self.authorized_users
+
+    def get_available_rooms(self) -> List[RoomType]:
+        """Get list of available rooms in the house"""
+        return [RoomType[room["type"]] for room in self.rooms.values()]
+
+    def get_objects_in_room(self, room_type: RoomType) -> List[str]:
+        """Get list of objects in a specific room"""
+        # If passed a Position instead of RoomType, get the room type first
+        if isinstance(room_type, Position):
+            room_type = self.get_room(room_type)
+        
+        # Now look up objects for this room type
+        for room in self.rooms.values():
+            if room["type"] == room_type.value:
+                return room["objects"]
+        return []
 
     def is_valid_move(self, position: Position) -> bool:
         return position in self.rooms
@@ -120,3 +137,54 @@ class House:
     def is_door_locked(self) -> bool:
         """Check if the front door is locked"""
         return self.front_door.locked
+
+    def serialize(self) -> dict:
+        """Serialize house state"""
+        return {
+            'rooms': {
+                f"{pos.x},{pos.y}": room.value
+                for pos, room in self.rooms.items()
+            },
+            'objects': {
+                f"{pos.x},{pos.y}": [
+                    obj.serialize() if obj else None
+                    for obj in objects
+                ]
+                for pos, objects in self.objects.items()
+            },
+            'authorized_users': list(self.authorized_users)
+        }
+
+    def ring_doorbell(self, visitor_name: str) -> bool:
+        """Handle doorbell ring event"""
+        if visitor_name not in self.doorbell_queue:
+            self.doorbell_queue.append(visitor_name)
+            # Create notification message
+            notification = f"{visitor_name} is waiting at the door"
+            
+            # Add notification to environment for all characters in house
+            for character_name in self.authorized_users:
+                if character_name in self.world_state.character_positions:
+                    char_pos = self.world_state.character_positions[character_name]
+                    if self.position == char_pos:  # If character is in this house
+                        self.memory.add_memory(
+                            notification,
+                            importance=0.7,
+                            emotions={'alert': 0.8}
+                        )
+            return True
+        return False
+        
+    def remove_from_doorbell_queue(self, visitor_name: str):
+        """Remove visitor from doorbell queue after they're let in or leave"""
+        if visitor_name in self.doorbell_queue:
+            self.doorbell_queue.remove(visitor_name)
+
+    def update(self, delta_time: float):
+        """Update house state based on time passed"""
+        # Currently no time-based updates needed, but we'll implement the method
+        # for future features like:
+        # - Utility costs
+        # - Object wear and tear
+        # - Environmental changes
+        pass

@@ -27,6 +27,7 @@ class ObjectType(Enum):
     DOOR = 'door'
     FOOD = 'food'
     DRINK = 'drink'
+    DOORBELL = 'doorbell'
 
 class BuildingType(Enum):
     HOUSE = "house"

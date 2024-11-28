@@ -8,57 +8,57 @@ import os
 import json
 from src.phone.voice_chat_server import voice_server
 from src.environment.map import GameMap
-from src.utils.models import Position
+from src.utils.position import Position
+from src.utils.constants import RoomType
 
 class AutonomousSimsGame:
-    def __init__(self):
-        self.game_map = GameMap()
-        # Try to find an existing house for our character
-        character_house = None
-        available_houses = self.game_map.get_available_houses()
-        
-        # First check if character already has a house
-        for pos, plot in self.game_map.plots.items():
-            if plot.owner == "AI Character":
-                character_house = pos
-                break
-        
-        # If no house found, try to assign an available one
-        if not character_house and available_houses:
-            character_house = available_houses[0]
-        
-        # If still no house, create a new one
-        if not character_house:
-            character_house = Position(0, 0)  # Default position for new house
-        
-        # Now ensure we have a house at this position
-        if not self.game_map.assign_house_to_character("AI Character", character_house):
-            raise Exception("Failed to create or assign house for character")
-        
-        # Get the house instance
-        self.house = self.game_map.get_building(character_house)
-        if not self.house:
-            raise Exception("Failed to get house instance")
-        
-        # Create character with valid house
-        self.character = AutonomousCharacter("AI Character", self.house)
-        # Initialize character position to the assigned house
-        self.game_map.world_state.set_character_position("AI Character", character_house)
-        # Authorize character to use their house's front door
-        self.house.authorize_user("AI Character")
-        
-        # Initialize voice server with character reference
-        voice_server.initialize_phone_system(self.character)
-        
-        self.running = True
-        self.last_update = time.time()
-        self.last_knowledge_save = time.time()
-        self.knowledge_save_interval = 300  # Save knowledge every 5 minutes
-        
-        # Set up logging
-        self.setup_logging()
+    def __init__(self, character_name: str):
+        try:
+            # Set up logging first
+            self.setup_logging(character_name)
+            self.logger.info(f"Initializing game for character {character_name}")
+            
+            # Initialize game map
+            self.game_map = GameMap()
+            
+            # Create character using the robust method
+            self.character = self._create_character(character_name)
+            
+            # Initialize character data
+            character_data = {
+                'name': character_name,
+                'position': {
+                    'x': self.character.position.x,
+                    'y': self.character.position.y
+                },
+                'online': True,
+                'last_update': time.time(),
+                'current_room': self.character.current_room.value,
+                'status': 'active',
+                'needs': self.character.needs,
+                'thought': None,
+                'current_action': None
+            }
+            
+            # Register character with game map
+            if not self.game_map.register_character(character_data):
+                raise Exception(f"Failed to register character {character_name} with game map")
+            
+            # Initialize voice server with character reference
+            voice_server.initialize_phone_system(self.character)
+            
+            self.running = True
+            self.last_update = time.time()
+            self.last_knowledge_save = time.time()
+            self.knowledge_save_interval = 300  # Save knowledge every 5 minutes
+            
+            self.logger.info(f"Character {character_name} initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing game: {str(e)}", exc_info=True)
+            raise
 
-    def setup_logging(self):
+    def setup_logging(self, character_name: str):
         # Create a timestamp for the log file
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
@@ -70,23 +70,23 @@ class AutonomousSimsGame:
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(f'logs/game_{timestamp}.log'),
+                logging.FileHandler(f'logs/game_{character_name}_{timestamp}.log'),
                 logging.StreamHandler()
             ]
         )
         
-        self.logger = logging.getLogger('AutonomousGame')
+        self.logger = logging.getLogger(f'AutonomousGame_{character_name}')
         
         # Create separate loggers for LLM and actions with their own files
-        llm_handler = logging.FileHandler(f'logs/llm_{timestamp}.log')
+        llm_handler = logging.FileHandler(f'logs/llm_{character_name}_{timestamp}.log')
         llm_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        self.llm_logger = logging.getLogger('LLM')
+        self.llm_logger = logging.getLogger(f'LLM_{character_name}')
         self.llm_logger.addHandler(llm_handler)
         self.llm_logger.propagate = False  # Prevent duplicate logging
         
-        action_handler = logging.FileHandler(f'logs/actions_{timestamp}.log')
+        action_handler = logging.FileHandler(f'logs/actions_{character_name}_{timestamp}.log')
         action_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        self.action_logger = logging.getLogger('Actions')
+        self.action_logger = logging.getLogger(f'Actions_{character_name}')
         self.action_logger.addHandler(action_handler)
         self.action_logger.propagate = False  # Prevent duplicate logging
 
@@ -140,45 +140,63 @@ class AutonomousSimsGame:
         os.makedirs('states', exist_ok=True)
         
         # Save to JSON file
-        with open(f'states/character_state_{timestamp}.json', 'w') as f:
+        with open(f'states/character_state_{self.character.name}_{timestamp}.json', 'w') as f:
             json.dump(state, f, indent=4)
             
         # Also save knowledge system state when saving character state
         self.character.knowledge_system.save_state()
 
-    def run(self):
-        self.logger.info("Starting Autonomous Sims Simulation...")
-        try:
-            while self.running:
-                current_time = time.time()
-                delta_time = current_time - self.last_update
-                
-                # Only update every 2 seconds
-                if delta_time >= 2:
-                    result = self.update()
-                    self.last_update = current_time
-                    
-                    # Print status
-                    print(f"\nThought: {self.character.thought}")
-                    print(f"Action: {result}")
-                    print("\nNeeds:")
-                    for need, value in self.character.needs.items():
-                        print(f"  {need}: {value:.1f}")
-                    
-                    # Save state periodically (every 5 minutes)
-                    if current_time - self.last_knowledge_save >= self.knowledge_save_interval:
-                        self.save_character_state()
-                        self.last_knowledge_save = current_time
-                
-                # Small sleep to prevent CPU overuse
-                time.sleep(0.1)
-                
-        except KeyboardInterrupt:
-            self.logger.info("\nSimulation stopped by user")
-            self.save_character_state()
-        except Exception as e:
-            self.logger.error(f"Simulation crashed with error: {str(e)}", exc_info=True)
-            self.save_character_state()
-        finally:
-            if hasattr(self.character, 'browser') and self.character.browser:
-                self.character.browser.close()
+    def _create_character(self, name: str) -> AutonomousCharacter:
+        """Create a character instance with proper house assignment"""
+        logger = logging.getLogger("CharacterCreation")
+        
+        # Try to find an existing house for our character
+        character_house = None
+        
+        # First check if character already has a house
+        for pos, plot in self.game_map.plots.items():
+            if plot.owner == name:
+                character_house = pos
+                logger.info(f"Found existing house for {name} at {pos}")
+                break
+        
+        # If no house found, try to find an empty plot
+        if not character_house:
+            empty_plots = self.game_map.get_empty_plots()
+            if empty_plots:
+                character_house = empty_plots[0]  # Take first empty plot
+                logger.info(f"Assigning empty plot at {character_house} to {name}")
+            else:
+                # Find a new position that doesn't overlap with existing plots
+                x, y = 0, 0
+                while Position(x, y) in self.game_map.plots:
+                    x += 1
+                    if x > 10:  # Wrap to next row after 10 columns
+                        x = 0
+                        y += 1
+                character_house = Position(x, y)
+                logger.info(f"Creating new plot at {character_house} for {name}")
+        
+        # Now ensure we have a house at this position
+        if not self.game_map.assign_house_to_character(name, character_house):
+            logger.error(f"Failed to assign house at {character_house} to {name}")
+            raise Exception("Failed to create or assign house for character")
+        
+        # Get the house instance
+        house = self.game_map.get_building(character_house)
+        if not house:
+            logger.error(f"Failed to get house instance at {character_house}")
+            raise Exception("Failed to get house instance")
+        
+        logger.info(f"Successfully created/assigned house for {name} at {character_house}")
+        
+        # Create character with house and game_map
+        character = AutonomousCharacter(name, house, self.game_map)
+        
+        # Initialize character position
+        self.game_map.world_state.set_character_position(name, character_house)
+        
+        # Authorize character to use their house
+        house.authorize_user(name)
+        
+        return character

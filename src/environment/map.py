@@ -1,352 +1,219 @@
 import json
 import os
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 from src.utils.models import Position
-from src.utils.constants import BuildingType, RoomType
 from src.environment.house import House
-from src.environment.house_manager import HouseManager
 from src.environment.world_state import WorldState
-
-class Plot:
-    def __init__(self, position: Position, building_type: BuildingType = None):
-        self.position = position
-        self.building_type = building_type
-        self.building = None
-        self.owner = None
-        self.locked = False
-        self.allowed_visitors: Set[str] = set()  # Set of character names allowed to enter
-
-    def lock(self, owner_name: str):
-        if self.owner == owner_name:
-            self.locked = True
-            return True
-        return False
-
-    def unlock(self, owner_name: str):
-        if self.owner == owner_name:
-            self.locked = False
-            return True
-        return False
-
-    def can_enter(self, character_name: str) -> bool:
-        return (not self.locked or 
-                character_name == self.owner or 
-                character_name in self.allowed_visitors)
-
-    def grant_access(self, owner_name: str, visitor_name: str) -> bool:
-        if self.owner == owner_name:
-            self.allowed_visitors.add(visitor_name)
-            return True
-        return False
-
-    def revoke_access(self, owner_name: str, visitor_name: str) -> bool:
-        if self.owner == owner_name:
-            self.allowed_visitors.discard(visitor_name)
-            return True
-        return False
+import logging
+import time
 
 class GameMap:
     def __init__(self):
-        self.plots: Dict[Position, Plot] = {}
-        self.house_manager = HouseManager()
-        self.world_state = WorldState()
-        self.load_map()
-
-    def load_map(self):
-        """Load map data from JSON file"""
-        map_path = os.path.join(os.path.dirname(__file__), 'map.json')
+        # Initialize logger first
+        self.logger = logging.getLogger("GameMap")
+        
+        # Initialize basic structures
+        self.active_characters = set()
+        self.characters = {}
+        self.character_positions = {}
+        self.plots: Dict[Position, House] = {}
+        
         try:
-            with open(map_path, 'r') as f:
+            # Initialize world state
+            self.world_state = WorldState()
+            self.logger.info("World state initialized")
+            
+            # Load map state and sync with world state
+            self._load_map_state()
+            self._sync_with_world_state()
+            self.logger.info("GameMap initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Error during GameMap initialization: {str(e)}")
+            raise
+        
+    def _load_map_state(self):
+        """Load initial map state from configuration"""
+        try:
+            map_config_path = os.path.join(os.path.dirname(__file__), 'houses.json')
+            with open(map_config_path, 'r') as f:
                 map_data = json.load(f)
                 
-            # Initialize plots from map data
-            for area in map_data['plots'].values():
-                for plot_data in area.values():
-                    position = Position(plot_data['position']['x'], plot_data['position']['y'])
-                    building_type = BuildingType[plot_data['type']]
-                    
-                    plot = Plot(position, building_type)
-                    
-                    # Set additional plot data if available
-                    if 'owner' in plot_data:
-                        plot.owner = plot_data['owner']
-                    if 'locked' in plot_data:
-                        plot.locked = plot_data['locked']
-                    if 'allowed_visitors' in plot_data:
-                        plot.allowed_visitors = set(plot_data['allowed_visitors'])
-                    
-                    # If it's a house plot, link it to the house database
-                    if building_type == BuildingType.HOUSE and 'house_id' in plot_data:
-                        house_data = self.house_manager.get_house_by_id(plot_data['house_id'])
-                        if house_data and not house_data['owner']:
-                            plot.building = self.house_manager.create_house_instance(plot_data['house_id'])
-                    
-                    self.plots[position] = plot
-                    
-        except FileNotFoundError:
-            print(f"Warning: Map database not found at {map_path}")
-            self.initialize_default_map()
-
-    def save_map(self):
-        """Save current map state back to JSON"""
-        map_data = {
-            "plots": {
-                "residential_area": {},
-                "commercial_area": {},
-                "empty_plots": {}
-            }
-        }
-        
-        for pos, plot in self.plots.items():
-            plot_data = {
-                "position": {"x": pos.x, "y": pos.y},
-                "type": plot.building_type.name,
-                "owner": plot.owner,
-                "locked": plot.locked,
-                "allowed_visitors": list(plot.allowed_visitors)
-            }
-            
-            if plot.building_type == BuildingType.HOUSE:
-                area = "residential_area"
-            elif plot.building_type == BuildingType.SUPERMARKET:
-                area = "commercial_area"
-            else:
-                area = "empty_plots"
+            # Load houses/plots
+            for plot_data in map_data.get('plots', []):
+                pos = Position(plot_data['position']['x'], plot_data['position']['y'])
+                house = House(pos)
+                if 'owner' in plot_data:
+                    house.owner = plot_data['owner']
+                self.plots[pos] = house
                 
-            map_data["plots"][area][f"plot_{pos.x}_{pos.y}"] = plot_data
-        
-        map_path = os.path.join(os.path.dirname(__file__), 'map.json')
-        with open(map_path, 'w') as f:
-            json.dump(map_data, f, indent=4)
-
-    def assign_house_to_character(self, character_name: str, house_position: Position) -> bool:
-        plot = self.plots.get(house_position)
-        if plot and plot.building_type == BuildingType.HOUSE:
-            # First check if character already owns this house
-            if plot.owner == character_name:
-                # Create new house data if it doesn't exist
-                house_id = "house_1"
-                if house_id not in self.house_manager.houses:
-                    new_house_data = {
-                        "id": house_id,
-                        "name": "Default House",
-                        "position": {"x": house_position.x, "y": house_position.y},
-                        "owner": character_name,
-                        "price": 20000,
-                        "rooms": {
-                            "hallway": {
-                                "type": "HALLWAY",
-                                "position": {"x": 0, "y": -1},
-                                "objects": ["door"]
-                            },
-                            "bedroom": {
-                                "type": "BEDROOM",
-                                "position": {"x": 0, "y": 0},
-                                "objects": ["bed"]
-                            },
-                            "bathroom": {
-                                "type": "BATHROOM",
-                                "position": {"x": 1, "y": 0},
-                                "objects": ["toilet", "shower"]
-                            },
-                            "living_room": {
-                                "type": "LIVING_ROOM",
-                                "position": {"x": 0, "y": 1},
-                                "objects": ["tv", "computer", "couch", "phone"]
-                            },
-                            "kitchen": {
-                                "type": "KITCHEN",
-                                "position": {"x": 1, "y": 1},
-                                "objects": ["fridge", "stove"]
-                            }
-                        },
-                        "description": "A comfortable starter home."
-                    }
-                    self.house_manager.add_house(new_house_data)
-                
-                plot.building = self.house_manager.create_house_instance(house_id)
-                return True
+            self.logger.info(f"Loaded {len(self.plots)} plots from map configuration")
             
-            # If house is unowned, assign it
-            if not plot.owner:
-                # Find the house in the house manager
-                house_data = self.house_manager.get_house_by_position(house_position)
-                if house_data:
-                    if self.house_manager.assign_house_to_owner(house_data['id'], character_name):
-                        plot.owner = character_name
-                        plot.building = self.house_manager.create_house_instance(house_data['id'])
-                        self.save_map()
-                        return True
-                else:
-                    # If no house data found, create a new default house
-                    new_house_id = f"house_{len(self.house_manager.houses) + 1}"
-                    new_house_data = {
-                        "id": new_house_id,
-                        "name": f"New House {new_house_id}",
-                        "position": {"x": house_position.x, "y": house_position.y},
-                        "owner": character_name,
-                        "price": 20000,
-                        "rooms": {
-                            "hallway": {
-                                "type": "HALLWAY",
-                                "position": {"x": 0, "y": -1},
-                                "objects": ["door"]
-                            },
-                            "bedroom": {
-                                "type": "BEDROOM",
-                                "position": {"x": 0, "y": 0},
-                                "objects": ["bed"]
-                            },
-                            "bathroom": {
-                                "type": "BATHROOM",
-                                "position": {"x": 1, "y": 0},
-                                "objects": ["toilet", "shower"]
-                            },
-                            "living_room": {
-                                "type": "LIVING_ROOM",
-                                "position": {"x": 0, "y": 1},
-                                "objects": ["tv", "computer", "couch", "phone"]
-                            },
-                            "kitchen": {
-                                "type": "KITCHEN",
-                                "position": {"x": 1, "y": 1},
-                                "objects": ["fridge", "stove"]
-                            }
-                        },
-                        "description": "A newly built home."
-                    }
-                    
-                    if self.house_manager.add_house(new_house_data):
-                        plot.owner = character_name
-                        plot.building = self.house_manager.create_house_instance(new_house_id)
-                        self.save_map()
-                        return True
-        return False
-
-    def get_available_houses(self) -> List[Position]:
-        return [pos for pos, plot in self.plots.items() 
-                if plot.building_type == BuildingType.HOUSE and not plot.owner]
-
+        except Exception as e:
+            self.logger.error(f"Error loading map state: {str(e)}")
+            # Create a default plot if loading fails
+            default_pos = Position(0, 0)
+            self.plots[default_pos] = House(default_pos)
+            
+    def _sync_with_world_state(self):
+        """Synchronize game map state with world state"""
+        try:
+            if not hasattr(self.world_state, 'characters'):
+                self.logger.warning("World state missing characters dict, initializing empty")
+                self.world_state.characters = {}
+            
+            # Sync characters from world state
+            for char_name, char_data in self.world_state.characters.items():
+                # Update characters dict
+                self.characters[char_name] = char_data
+                
+                # Update character positions
+                if 'position' in char_data:
+                    pos = Position(
+                        char_data['position']['x'],
+                        char_data['position']['y']
+                    )
+                    self.character_positions[char_name] = pos
+                
+                # Update active characters
+                if char_data.get('online', False) and \
+                   time.time() - char_data.get('last_update', 0) < 30:
+                    self.active_characters.add(char_name)
+            
+            self.logger.info(f"Successfully synced {len(self.characters)} characters from world state")
+            
+        except Exception as e:
+            self.logger.error(f"Error syncing with world state: {str(e)}")
+            # Initialize empty state if sync fails
+            self.characters = {}
+            self.character_positions = {}
+            self.active_characters = set()
+            
+    def register_character(self, character_data: dict) -> bool:
+        """Register a character with the game map"""
+        try:
+            name = character_data['name']
+            
+            # Update character data
+            character_data['online'] = True
+            character_data['last_update'] = time.time()
+            character_data['status'] = 'active'
+            
+            # Update world state first
+            self.world_state.characters[name] = character_data
+            pos = Position(
+                character_data['position']['x'],
+                character_data['position']['y']
+            )
+            self.world_state.set_character_position(name, pos)
+            
+            # Update local tracking
+            self.characters[name] = character_data
+            self.character_positions[name] = pos
+            self.active_characters.add(name)
+            
+            self.logger.info(f"Successfully registered character {name} at position {pos}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error registering character: {str(e)}")
+            return False
+            
+    def update_character(self, character_data: dict) -> bool:
+        """Update a character's state in the game map"""
+        try:
+            name = character_data['name']
+            
+            # Update timestamps and status
+            character_data['last_update'] = time.time()
+            character_data['online'] = True
+            character_data['status'] = 'active'
+            
+            # Update local tracking
+            self.characters[name] = character_data
+            self.active_characters.add(name)
+            
+            # Update position
+            pos = Position(
+                character_data['position']['x'],
+                character_data['position']['y']
+            )
+            self.character_positions[name] = pos
+            
+            # Update world state
+            self.world_state.characters[name] = character_data
+            self.world_state.set_character_position(name, pos)
+            
+            self.logger.info(f"Successfully updated character {name}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error updating character: {str(e)}")
+            return False
+            
     def get_empty_plots(self) -> List[Position]:
-        return [pos for pos, plot in self.plots.items() 
-                if plot.building_type == BuildingType.EMPTY]
-
-    def get_plot(self, position: Position) -> Optional[Plot]:
-        return self.plots.get(position)
-
-    def is_valid_move(self, position: Position) -> bool:
-        return position in self.plots
-
-    def can_enter_plot(self, position: Position, character_name: str) -> bool:
-        plot = self.plots.get(position)
-        if plot:
-            return plot.can_enter(character_name)
-        return False
-
-    def get_building(self, position: Position) -> Optional[House]:
-        plot = self.plots.get(position)
-        if plot:
-            return plot.building
-        return None
-
-    def initialize_default_map(self):
-        """Initialize a default map if JSON file is not found"""
-        # Add default house plots
-        for y in range(3):
-            pos = Position(0, y)
-            plot = Plot(pos, BuildingType.HOUSE)
-            self.plots[pos] = plot
-
-        # Add supermarket
-        supermarket_pos = Position(2, 0)
-        plot = Plot(supermarket_pos, BuildingType.SUPERMARKET)
-        self.plots[supermarket_pos] = plot
-
-        # Add empty plots
-        empty_positions = [
-            Position(2, 1),
-            Position(2, 2),
-            Position(1, 2)
-        ]
-        for pos in empty_positions:
-            plot = Plot(pos, BuildingType.EMPTY)
-            self.plots[pos] = plot
-
-    def move_character(self, character_name: str, new_position: Position) -> bool:
-        """Move a character to a new position if valid"""
-        if self.is_valid_move(new_position):
-            plot = self.get_plot(new_position)
-            if plot and plot.can_enter(character_name):
-                self.world_state.set_character_position(character_name, new_position)
-                return True
-        return False
-
-    def get_character_location(self, character_name: str) -> Optional[Position]:
-        """Get a character's current position"""
-        return self.world_state.get_character_position(character_name)
-
-    def update(self, delta_time: float):
-        """Update the game world state"""
-        self.world_state.update_time(delta_time)
-
-    def add_new_house(self, character_name: str) -> Optional[Position]:
-        """Add a new house plot to the map for a character"""
-        # Find a suitable position for the new house
-        # Try positions incrementally until finding an unused spot
-        for x in range(-5, 6):  # Search in a reasonable range
-            for y in range(-5, 6):
-                new_pos = Position(x, y)
-                if new_pos not in self.plots:
-                    # Create new plot with house
-                    plot = Plot(new_pos, BuildingType.HOUSE)
-                    plot.owner = character_name
-                    
-                    # Create a new house instance
-                    house_id = f"house_{len(self.house_manager.houses) + 1}"
-                    new_house_data = {
-                        "id": house_id,
-                        "name": f"New House {house_id}",
-                        "position": {"x": x, "y": y},
-                        "owner": character_name,
-                        "price": 20000,
-                        "rooms": {
-                            "hallway": {
-                                "type": "HALLWAY",
-                                "position": {"x": 0, "y": -1},
-                                "objects": ["door"]
-                            },
-                            "bedroom": {
-                                "type": "BEDROOM",
-                                "position": {"x": 0, "y": 0},
-                                "objects": ["bed"]
-                            },
-                            "bathroom": {
-                                "type": "BATHROOM",
-                                "position": {"x": 1, "y": 0},
-                                "objects": ["toilet", "shower"]
-                            },
-                            "living_room": {
-                                "type": "LIVING_ROOM",
-                                "position": {"x": 0, "y": 1},
-                                "objects": ["tv", "computer", "couch", "phone"]
-                            },
-                            "kitchen": {
-                                "type": "KITCHEN",
-                                "position": {"x": 1, "y": 1},
-                                "objects": ["fridge", "stove"]
-                            }
-                        },
-                        "description": "A newly built home."
-                    }
-                    
-                    # Add house to house manager
-                    self.house_manager.add_house(new_house_data)
-                    plot.building = self.house_manager.create_house_instance(house_id)
-                    
-                    # Add plot to map
-                    self.plots[new_pos] = plot
-                    self.save_map()
-                    
-                    return new_pos
+        """Get list of unowned plots"""
+        return [pos for pos, house in self.plots.items() if not house.owner]
         
-        return None
+    def assign_house_to_character(self, character_name: str, position: Position) -> bool:
+        """Assign a house at the given position to a character"""
+        # Create a new house if one doesn't exist at this position
+        if position not in self.plots:
+            self.plots[position] = House(position)
+            self.logger.info(f"Created new house at {position}")
+        
+        house = self.plots[position]
+        if not house.owner:
+            house.owner = character_name
+            # Add character to active characters set
+            self.active_characters.add(character_name)
+            # Update world state
+            self.world_state.characters[character_name] = {
+                'name': character_name,
+                'position': {'x': position.x, 'y': position.y},
+                'online': True,
+                'last_update': time.time(),
+                'status': 'active'
+            }
+            self.logger.info(f"Assigned house at {position} to {character_name}")
+            return True
+        elif house.owner == character_name:
+            # Ensure character is in active set and world state
+            self.active_characters.add(character_name)
+            if character_name not in self.world_state.characters:
+                self.world_state.characters[character_name] = {
+                    'name': character_name,
+                    'position': {'x': position.x, 'y': position.y},
+                    'online': True,
+                    'last_update': time.time(),
+                    'status': 'active'
+                }
+            return True  # Already owned by this character
+        
+        return False
+        
+    def get_building(self, position: Position) -> Optional[House]:
+        """Get building at the given position"""
+        return self.plots.get(position)
+        
+    def update(self, delta_time: float):
+        """Update game map state"""
+        # Update world time
+        self.world_state.update_time(delta_time)
+        
+        # Update houses
+        for house in self.plots.values():
+            house.update(delta_time)
+            
+    def serialize(self) -> dict:
+        """Serialize game map state"""
+        return {
+            'plots': [
+                {
+                    'position': {'x': pos.x, 'y': pos.y},
+                    'owner': house.owner if house.owner else None
+                }
+                for pos, house in self.plots.items()
+            ],
+            'characters': self.characters,
+            'world_state': self.world_state.serialize()
+        }

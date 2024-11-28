@@ -1,14 +1,10 @@
 import time
-from src.game.autonomous_game import AutonomousSimsGame
 from src.phone.voice_chat_server import run_server
+from src.server.world_server import WorldServer
 import threading
 import logging
-
-def run_game(game):
-    try:
-        game.run()
-    except Exception as e:
-        logging.error(f"Game thread error: {str(e)}", exc_info=True)
+from src.environment.map import GameMap
+from src.environment.world_state import WorldState
 
 def run_server_wrapper(host, port):
     try:
@@ -16,31 +12,57 @@ def run_server_wrapper(host, port):
     except Exception as e:
         logging.error(f"Server thread error: {str(e)}", exc_info=True)
 
+def run_world_server(world_server):
+    try:
+        world_server.start()
+    except Exception as e:
+        logging.error(f"World server error: {str(e)}", exc_info=True)
+
 if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(level=logging.INFO)
-    
-    # Create the game instance
-    game = AutonomousSimsGame()
-    
-    # Start the game in a separate thread
-    game_thread = threading.Thread(target=run_game, args=(game,))
-    game_thread.daemon = False  # Make thread non-daemon so it won't exit when main thread exits
-    game_thread.start()
-    
-    # Start the server in a separate thread
-    server_thread = threading.Thread(target=run_server_wrapper, args=('0.0.0.0', 5000))
-    server_thread.daemon = True  # Make server thread daemon so it exits when main thread exits
-    server_thread.start()
+    logger = logging.getLogger(__name__)
     
     try:
-        # Keep main thread alive
+        # Create game map first (it will create its own world state)
+        game_map = GameMap()
+        
+        # Get the world state reference from game map
+        world_state = game_map.world_state
+        
+        # Initialize and start world server with game map
+        world_server = WorldServer(game_map)
+        world_server_thread = threading.Thread(target=run_world_server, args=(world_server,))
+        world_server_thread.daemon = True
+        world_server_thread.start()
+        
+        # Start the voice chat server in a separate thread
+        server_thread = threading.Thread(target=run_server_wrapper, args=('0.0.0.0', 5000))
+        server_thread.daemon = True
+        server_thread.start()
+        
+        logger.info("All servers started successfully")
+        
+        # Keep main thread alive and monitor threads
         while True:
             time.sleep(1)
-            if not game_thread.is_alive():
-                logging.error("Game thread died unexpectedly")
+            if not world_server_thread.is_alive():
+                logger.error("World server thread died unexpectedly")
                 break
+            if not server_thread.is_alive():
+                logger.error("Voice chat server thread died unexpectedly")
+                break
+            
+            # Update world state time
+            world_state.update_time(1.0 / 3600.0)  # Update time by 1 second converted to hours
+                
     except KeyboardInterrupt:
-        print("\nShutting down gracefully...")
-        game.running = False  # Signal game loop to stop
-        game_thread.join(timeout=5)  # Wait for game thread to finish
+        logger.info("\nShutting down servers gracefully...")
+    except Exception as e:
+        logger.error(f"Main thread error: {str(e)}", exc_info=True)
+    finally:
+        # Cleanup
+        if 'world_server' in locals():
+            world_server.stop()
+        # Give threads a moment to clean up
+        time.sleep(2)

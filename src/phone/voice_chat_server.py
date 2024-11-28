@@ -3,6 +3,7 @@ from flask_cors import CORS
 import logging
 from pathlib import Path
 from src.phone.phone_system import PhoneSystem
+from src.utils.models import Position
 
 app = Flask(__name__, static_folder='.')
 CORS(app)
@@ -22,10 +23,12 @@ class VoiceChatServer:
     def __init__(self):
         self.phone_system = None
         self.character = None
+        self.game_map = None
         
     def initialize_phone_system(self, character):
         """Initialize phone system with character reference"""
         self.character = character
+        self.game_map = character.game_map
         self.phone_system = PhoneSystem(character)
         return {"success": True, "message": "Phone system initialized"}
 
@@ -100,60 +103,43 @@ def add_header(response):
 def start_call():
     try:
         logger.debug("Received start-call request")
-        logger.debug(f"Request data: {request.get_data()}")
-        logger.debug(f"Request JSON: {request.get_json(silent=True)}")
         
         if not voice_server.phone_system:
             logger.error("Phone system not initialized")
             return make_response(jsonify({
                 "success": False,
                 "error": "Phone system not initialized"
-            }), 503)  # Service Unavailable
+            }), 503)
             
-        # Initialize phone system if not already done
-        if not voice_server.character:
-            logger.warning("Character not initialized, attempting to initialize...")
-            try:
-                # Create a basic character initialization
-                from src.character.autonomous_character import AutonomousCharacter
-                from src.environment.house import House
-                
-                house = House()
-                character = AutonomousCharacter("AI Assistant", house)
-                voice_server.initialize_phone_system(character)
-                logger.info("Successfully initialized character and phone system")
-            except Exception as e:
-                logger.error(f"Failed to initialize character: {e}")
-                return make_response(jsonify({
-                    "success": False,
-                    "error": "Failed to initialize character system"
-                }), 500)
-            
-        logger.debug(f"Phone system state - in_call: {voice_server.phone_system.in_call}")
-        
-        # Get message from request body (if any)
         data = request.get_json(silent=True) or {}
+        target_character = data.get('character')
         initial_message = data.get('message', '')
-        logger.debug(f"Initial message: {initial_message}")
+        
+        if not target_character:
+            return make_response(jsonify({
+                "success": False,
+                "error": "No target character specified"
+            }), 400)
             
-        # Start call with optional initial message
-        logger.debug("Attempting to start call...")
-        result = voice_server.phone_system.start_call(initial_message)
+        # Verify character exists
+        world_state = voice_server.character.house.game_map.world_state
+        if target_character not in world_state.character_positions:
+            return make_response(jsonify({
+                "success": False,
+                "error": f"Character '{target_character}' not found"
+            }), 404)
+        
+        # Start call with specified character
+        result = voice_server.phone_system.start_call(target_character, initial_message)
         logger.debug(f"Start call result: {result}")
         
-        if result.get("success", False):
-            logger.info("Call started successfully")
-            return make_response(jsonify(result), 200)
-        else:
-            logger.warning(f"Call start failed: {result.get('error', 'Unknown error')}")
-            return make_response(jsonify(result), 400)  # Bad Request
+        return make_response(jsonify(result), 200 if result.get("success") else 400)
             
     except Exception as e:
         logger.error(f"Error starting call: {str(e)}", exc_info=True)
         return make_response(jsonify({
             "success": False,
-            "error": str(e),
-            "in_call": voice_server.phone_system.in_call if voice_server.phone_system else False
+            "error": str(e)
         }), 500)
 
 @app.route('/end-call', methods=['POST'])
@@ -200,16 +186,100 @@ def get_character_status():
                 "error": "Character not initialized"
             })
             
+        world_state = voice_server.game_map.world_state
+        char_data = world_state.characters.get(voice_server.character.name, {})
+        
         return jsonify({
             "success": True,
-            "room": voice_server.character.current_room.value,
-            "activity": voice_server.character.current_action,
-            "thought": voice_server.character.thought,
-            "in_call": voice_server.phone_system.in_call if voice_server.phone_system else False
+            "room": voice_server.character.current_room.value if hasattr(voice_server.character, 'current_room') else None,
+            "activity": voice_server.character.current_action if hasattr(voice_server.character, 'current_action') else None,
+            "thought": voice_server.character.thought if hasattr(voice_server.character, 'thought') else None,
+            "in_call": voice_server.phone_system.in_call if voice_server.phone_system else False,
+            "online": world_state.is_character_online(voice_server.character.name),
+            "last_update": char_data.get('last_update', 0)
         })
         
     except Exception as e:
         logger.error(f"Error getting character status: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/available-characters', methods=['GET'])
+def get_available_characters():
+    try:
+        if not voice_server.character or not voice_server.game_map:
+            return jsonify({
+                "success": False,
+                "error": "Character system not initialized"
+            })
+            
+        # Get list of characters from world state
+        world_state = voice_server.game_map.world_state
+        characters = []
+        
+        # Add character details
+        for char_name, char_data in world_state.characters.items():
+            # Skip the current character
+            if char_name == voice_server.character.name:
+                continue
+                
+            # Get character position and online status
+            pos = world_state.get_character_position(char_name)
+            is_online = world_state.is_character_online(char_name)
+            
+            if pos:
+                plot = voice_server.game_map.get_plot(pos)
+                room = "Unknown"
+                if plot and plot.building:
+                    room = plot.building.get_room(Position(0, 0)).value
+                
+                characters.append({
+                    "name": char_name,
+                    "location": room,
+                    "online": is_online,
+                    "last_update": char_data.get('last_update', 0)
+                })
+        
+        return jsonify({
+            "success": True,
+            "characters": characters
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting available characters: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/debug/character-status/<character_name>')
+def debug_character_status(character_name):
+    """Debug endpoint to check character status"""
+    try:
+        if not voice_server.game_map:
+            return jsonify({
+                "success": False,
+                "error": "Game map not initialized"
+            })
+            
+        world_state = voice_server.game_map.world_state
+        char_data = world_state.characters.get(character_name, {})
+        
+        return jsonify({
+            "success": True,
+            "character_name": character_name,
+            "in_world_state": character_name in world_state.characters,
+            "in_positions": character_name in world_state.character_positions,
+            "in_active_set": character_name in voice_server.game_map.active_characters,
+            "online_status": world_state.is_character_online(character_name),
+            "last_update": char_data.get('last_update', 0),
+            "full_data": char_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting debug character status: {e}")
         return jsonify({
             "success": False,
             "error": str(e)

@@ -9,12 +9,42 @@
                 "x": 0,
                 "y": 0
             },
-            "last_active": "2024-11-27T20:54:53.654322",
-            "status": "active"
+            "last_active": "2024-11-28T02:59:20.144255",
+            "status": "offline",
+            "online": false,
+            "last_update": 0
+        },
+        "Bob": {
+            "position": {
+                "x": 0,
+                "y": 0
+            },
+            "home_position": {
+                "x": 0,
+                "y": 0
+            },
+            "last_active": "2024-11-28T02:59:20.144255",
+            "status": "offline",
+            "online": true,
+            "last_update": 1732771201.5796695
+        },
+        "Alice": {
+            "position": {
+                "x": 0,
+                "y": 0
+            },
+            "home_position": {
+                "x": 0,
+                "y": 0
+            },
+            "last_active": "2024-11-28T02:59:20.144255",
+            "status": "active",
+            "online": true,
+            "last_update": 1732780760.143256
         }
     },
     "time": {
-        "current_time": 8.0,
+        "current_time": 8.829133987358977,
         "day": 1,
         "season": "spring",
         "year": 1
@@ -32,7 +62,7 @@
             },
             "status": "open",
             "current_visitors": [],
-            "inventory_last_restocked": "2024-11-27T20:54:53.654322"
+            "inventory_last_restocked": "2024-11-28T02:59:20.144255"
         }
     },
     "events": {
@@ -40,7 +70,7 @@
         "active": []
     },
     "metadata": {
-        "last_saved": "2024-11-27T20:54:53.654322",
+        "last_saved": "2024-11-28T02:59:20.144255",
         "version": "1.0",
         "game_days_elapsed": 0
     }

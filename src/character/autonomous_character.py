@@ -15,20 +15,25 @@ from src.ears.whisper_manager import WhisperManager
 from src.voice.speech import Speech
 from src.voice.voice_manager import VoiceManager
 import time
+from src.utils.constants import RoomType
 from datetime import datetime
 from pathlib import Path
+from src.environment.map import GameMap
 from src.environment.activities import ActivityManager
 import logging
 import threading
 
 class AutonomousCharacter:
-    def __init__(self, name: str, house: House):
+    def __init__(self, name: str, house: House, game_map: GameMap):
         self.name = name
-        self.position = Position(0, 0)
         self.house = house
+        self.game_map = game_map
+        self.position = house.position
+        self.current_room = RoomType.LIVING_ROOM
         self.current_action = None
         self.thought = None
         self.last_action_time = time.time()
+        self.online = True
         self.decision_maker = LLMDecisionMaker()
         self.action_history = []
         
@@ -39,7 +44,6 @@ class AutonomousCharacter:
         # Replace direct needs dict with Needs system
         self.needs_system = Needs()
         self.memory = Memory()
-        self.current_room = self.house.get_room(self.position)
         self.coding_system = CodingSystem(name)
         self.journal_system = JournalSystem(name)
         self.knowledge_system = KnowledgeSystem()
@@ -126,13 +130,16 @@ class AutonomousCharacter:
         try:
             # Get basic state information
             current_room = self.house.get_room(self.position)
-            available_objects = self.house.get_objects_in_room(self.position)
+            available_objects = self.house.get_objects_in_room(current_room)
             
             # Get needs information
             needs_info = {
                 'needs': self.needs,
                 'urgent_needs': self.needs_system.get_urgent_needs(),
-                'need_status': self.needs_system.get_need_status()
+                'need_status': {
+                    need: self._get_need_status(value)
+                    for need, value in self.needs.items()
+                }
             }
             
             # Get memory and emotional information
@@ -170,6 +177,13 @@ class AutonomousCharacter:
                 **activity_info
             }
             
+            # Add doorbell information to context
+            if hasattr(self.house, 'doorbell_queue') and self.house.doorbell_queue:
+                context['doorbell'] = {
+                    'visitors': self.house.doorbell_queue.copy(),
+                    'waiting_since': time.time()  # You could store actual wait times in the queue
+                }
+            
             # Only check for environmental audio if we're not busy
             if not self.is_busy:
                 try:
@@ -189,7 +203,10 @@ class AutonomousCharacter:
                 'available_objects': [],
                 'needs': self.needs,
                 'urgent_needs': [],
-                'need_status': {},
+                'need_status': {
+                    need: self._get_need_status(value)
+                    for need, value in self.needs.items()
+                },
                 'recent_actions': [],
                 'recent_memories': [],
                 'important_memories': [],
@@ -210,6 +227,18 @@ class AutonomousCharacter:
     def _execute_decision(self, decision: Dict) -> str:
         action = decision['action']
         target = decision['target']
+        
+        # Add doorbell handling
+        if action == 'answer_door':
+            if hasattr(self.house, 'doorbell_queue') and self.house.doorbell_queue:
+                visitor = self.house.doorbell_queue[0]  # Get first waiting visitor
+                self.house.remove_from_doorbell_queue(visitor)
+                self.memory.add_memory(
+                    f"Answered door for {visitor}",
+                    importance=0.6,
+                    emotions={'social': 0.7}
+                )
+                return f"Answered door for {visitor}"
         
         if action == 'move':
             try:
@@ -391,20 +420,21 @@ class AutonomousCharacter:
 
     def _initialize_knowledge(self):
         # Add basic semantic knowledge about the house and rooms
-        for pos, room_type in self.house.rooms.items():
+        for room_name, room_data in self.house.rooms.items():
+            room_pos = room_data["position"]
+            room_type = room_data["type"]
             self.knowledge_system.add_semantic_knowledge(
-                f"The {room_type.value} is located at position ({pos.x}, {pos.y})",
-                metadata={'room_type': room_type.value}
+                f"The {room_type} is located at position ({room_pos['x']}, {room_pos['y']})",
+                metadata={'room_type': room_type}
             )
             
-        # Add knowledge about object effects - with None check
-        for pos, objects in self.house.objects.items():
-            for obj in objects:
-                if obj is not None:  # Add check for None objects
-                    self.knowledge_system.add_semantic_knowledge(
-                        f"The {obj.type.value} can be used for: {', '.join(obj.actions)}. Effects: {obj.need_effects}",
-                        metadata={'object_type': obj.type.value}
-                    )
+            # Add knowledge about objects in each room
+            objects = room_data["objects"]
+            if objects:
+                self.knowledge_system.add_semantic_knowledge(
+                    f"The {room_type} contains: {', '.join(objects)}",
+                    metadata={'room_type': room_type, 'objects': objects}
+                )
             
         # Add some periodic patterns
         self.knowledge_system.add_periodic_pattern(
@@ -483,3 +513,32 @@ class AutonomousCharacter:
             )
             return True
         return False
+
+    def serialize(self) -> dict:
+        """Serialize character state for network transmission"""
+        return {
+            'name': self.name,
+            'position': {
+                'x': self.position.x,
+                'y': self.position.y
+            },
+            'current_room': self.current_room.value if self.current_room else None,
+            'needs': self.needs,
+            'thought': self.thought,
+            'online': True,
+            'last_update': time.time(),
+            'status': 'active'
+        }
+
+    def _get_need_status(self, value: float) -> str:
+        """Convert need value to status string"""
+        if value >= 90:
+            return "excellent"
+        elif value >= 75:
+            return "good"
+        elif value >= 50:
+            return "okay"
+        elif value >= 25:
+            return "poor"
+        else:
+            return "critical"
